@@ -1,0 +1,59 @@
+# ========================
+# Inventario FX - .gitignore
+# ========================
+
+# --- Build output ---
+target/
+*.class
+*.jar
+*.exe
+dependency-reduced-pom.xml
+
+# --- IDE ---
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+.project
+.classpath
+.settings/
+
+# --- Application data (portable) ---
+.datos/
+
+# --- OS files ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# --- Temporary / generated ---
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+hs_err_pid*
+
+# --- Excel files (user data, not source) ---
+Inventario_*.xlsx
+inv_*.xlsx
+
+# --- Scripts de utilidad local ---
+scripts/
+remove_bom.ps1
+verificar_backup.bat
+verificar_db.sql
+migrar_sin_json.sql
+redundant.txt
+stale_imports.txt
+preparar_usb.bat
+
+# --- Old docs (already deleted from tree) ---
+DOCUMENTACION_ACADEMICA.md
+DOCUMENTACION_EMPRESARIAL.md
+INDICE_DOCUMENTACION.md
+MANUAL_TECNICO.md
+MANUAL_USUARIO.md
+classpath.txt
+cp.txt
+result.html

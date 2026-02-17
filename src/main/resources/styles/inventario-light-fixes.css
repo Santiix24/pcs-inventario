@@ -1,0 +1,60 @@
+/*
+ * SELCOMP Inventario - Fixes específicos para modo claro v4.0
+ * Overrides de alta especificidad para componentes inline-styled
+ */
+
+/* Inputs de filtro — override sobre estilos inline del Dashboard */
+.root .filter-input,
+.root .text-field.filter-input {
+    -fx-background-color: #FFFFFF;
+    -fx-text-fill: #172B4D;
+    -fx-prompt-text-fill: #7A869A;
+    -fx-border-color: #DFE1E6;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 6 12;
+    -fx-font-size: 12px;
+    -fx-pref-height: 34;
+}
+
+.root .filter-input:focused,
+.root .text-field.filter-input:focused {
+    -fx-border-color: #E63946;
+    -fx-effect: dropshadow(gaussian, rgba(230, 57, 70, 0.12), 6, 0, 0, 2);
+}
+
+/* Combos de filtro */
+.root .combo-box.filter-combo {
+    -fx-background-color: #FFFFFF;
+    -fx-border-color: #DFE1E6;
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
+    -fx-padding: 0 8;
+    -fx-pref-height: 34;
+}
+
+.root .combo-box.filter-combo .label,
+.root .combo-box.filter-combo .list-cell,
+.root .combo-box.filter-combo .text {
+    -fx-text-fill: #172B4D;
+}
+
+/* Popup cells */
+.root .combo-box-popup .list-view .list-cell {
+    -fx-text-fill: #172B4D;
+    -fx-background-color: #FFFFFF;
+}
+
+.root .combo-box-popup .list-view .list-cell:hover {
+    -fx-background-color: #EBF0FF;
+}
+
+/* Scrollbar en popups */
+.root .combo-box-popup .list-view .scroll-bar .thumb {
+    -fx-background-color: linear-gradient(to bottom, #C1C7D0, #B0B8C4);
+}
+
+/* Asegurar texto en inputs */
+.root .filter-input .text {
+    -fx-fill: #172B4D;
+}
