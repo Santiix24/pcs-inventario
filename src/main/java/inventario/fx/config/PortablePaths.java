@@ -66,43 +66,62 @@ public final class PortablePaths {
     // ════════════════════════════════════════════════════════════════════════
 
     /**
-     * Determina dónde vive la aplicación:
+     * Determina dónde vive la aplicación.
+     * Orden de prioridad:
      * <ol>
-     *   <li>Si existe la propiedad {@code app.home} (inyectada por jpackage / launcher), la usa.</li>
-     *   <li>Sino, usa el directorio donde está el JAR/clase principal.</li>
-     *   <li>Como fallback final, usa {@code user.dir} (directorio de trabajo).</li>
+     *   <li>{@code app.home} — inyectada manualmente por lanzador.</li>
+     *   <li>{@code user.dir} — con {@code <chdir>.} en Launch4j siempre apunta al directorio del .exe.</li>
+     *   <li>CodeSource — solo si NO es un directorio temporal del sistema.</li>
      * </ol>
      */
     private static Path resolverDirectorioBase() {
-        // 1. Propiedad inyectada por jpackage o script lanzador
+        // 1. Propiedad app.home inyectada explícitamente
         String appHome = System.getProperty("app.home");
         if (appHome != null && !appHome.isBlank()) {
             Path p = Paths.get(appHome).toAbsolutePath().normalize();
             if (Files.isDirectory(p)) return p;
         }
 
-        // 2. Ubicación del JAR (funciona tanto empaquetado como en desarrollo)
+        // 2. user.dir — Launch4j con <chdir>. lo fija al dir del .exe (más confiable que CodeSource)
+        try {
+            Path workDir = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+            if (Files.isDirectory(workDir) && !esDirTemporal(workDir)) {
+                return workDir;
+            }
+        } catch (Exception ignored) { }
+
+        // 3. CodeSource — funciona en desarrollo y cuando el JAR no está en temp
         try {
             Path jarPath = Paths.get(
                 PortablePaths.class.getProtectionDomain()
                     .getCodeSource().getLocation().toURI()
             ).toAbsolutePath().normalize();
-            
-            // Si es un archivo .jar, subir al directorio padre
-            if (Files.isRegularFile(jarPath)) {
-                return jarPath.getParent();
+
+            // Si la ruta parece un directorio temporal de Launch4j o del sistema, ignorarla
+            if (!esDirTemporal(jarPath)) {
+                if (Files.isRegularFile(jarPath)) {
+                    return jarPath.getParent();
+                }
+                // En desarrollo: target/classes → subir 2 niveles
+                if (jarPath.toString().contains("target")) {
+                    return jarPath.getParent().getParent();
+                }
+                if (Files.isDirectory(jarPath)) return jarPath;
             }
-            // Si es un directorio de clases (ej. target/classes), subir 2 niveles
-            if (jarPath.toString().contains("target")) {
-                return jarPath.getParent().getParent();
-            }
-            return jarPath;
         } catch (Exception e) {
             System.err.println("[PortablePaths] No se pudo resolver JAR path: " + e.getMessage());
         }
 
-        // 3. Fallback: directorio de trabajo
+        // 4. Fallback final: user.dir aunque sea temp (mejor que nada)
         return Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+    }
+
+    /** Retorna true si el path está dentro de un directorio temporal del sistema. */
+    private static boolean esDirTemporal(Path p) {
+        String s = p.toString().toLowerCase();
+        return s.contains("\\temp\\") || s.contains("\\tmp\\")
+            || s.contains("/temp/") || s.contains("/tmp/")
+            || s.contains("launch4j");
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -367,14 +386,33 @@ public final class PortablePaths {
     }
 
     /**
-     * Protege un archivo individual dentro de la carpeta de proyectos.
-     * Los archivos NO se ocultan — la seguridad viene de:
-     * 1. Carpeta .datos/ oculta (Hidden+System)
-     * 2. ACL restrictiva en la carpeta proyectos/
-     * 3. Cifrado AES del contenido Excel
+     * Protege un archivo individual sensible (claves, configs cifrados).
+     * En Windows: oculta el archivo y restringe ACL al usuario actual + SYSTEM.
+     * En otros SO: no-op (la protección viene del directorio).
      */
     public static void protegerArchivo(Path archivo) {
-        // No-op: los archivos se dejan visibles dentro de la carpeta protegida
+        if (!esWindows() || archivo == null || !Files.exists(archivo)) return;
+        try {
+            String ruta = archivo.toAbsolutePath().toString();
+            String usuario = System.getProperty("user.name");
+
+            // 1. Deshabilitar herencia de permisos
+            ejecutarComando("icacls", ruta, "/inheritance:d");
+
+            // 2. Remover grupos genéricos
+            ejecutarComando("icacls", ruta, "/remove:g", "Everyone", "/Q");
+            ejecutarComando("icacls", ruta, "/remove:g", "Users", "/Q");
+            ejecutarComando("icacls", ruta, "/remove:g", "Usuarios", "/Q");
+
+            // 3. Solo el usuario actual y SYSTEM tienen acceso
+            ejecutarComando("icacls", ruta, "/grant", usuario + ":F", "/Q");
+            ejecutarComando("icacls", ruta, "/grant", "SYSTEM:F", "/Q");
+
+            // 4. Ocultar el archivo
+            ocultarEnWindows(archivo);
+        } catch (Exception e) {
+            System.err.println("[PortablePaths] No se pudo proteger archivo: " + archivo + " → " + e.getMessage());
+        }
     }
 
     /** Ejecuta un comando del sistema sin esperar salida. */

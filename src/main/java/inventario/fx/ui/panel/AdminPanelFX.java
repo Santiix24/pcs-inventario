@@ -1857,8 +1857,7 @@ public class AdminPanelFX {
         // ═══════════════════════════════════════════════════════════════════════════
         // FOOTER - Botones de acción
         // ═══════════════════════════════════════════════════════════════════════════
-        HBox footer = new HBox(12);
-        footer.setAlignment(Pos.CENTER_RIGHT);
+        VBox footer = new VBox(8);
         footer.setPadding(new Insets(16, 28, 20, 28));
         footer.setStyle("-fx-border-color: " + TemaManager.getBorder() + "; -fx-border-width: 1 0 0 0;");
         
@@ -1866,9 +1865,11 @@ public class AdminPanelFX {
         lblError.setFont(Font.font("Segoe UI", 12));
         lblError.setTextFill(Color.web("#EF4444"));
         lblError.setVisible(false);
+        lblError.setWrapText(true);
+        lblError.setMaxWidth(Double.MAX_VALUE);
         
-        Region spacerFooter = new Region();
-        HBox.setHgrow(spacerFooter, Priority.ALWAYS);
+        HBox botonesRow = new HBox(12);
+        botonesRow.setAlignment(Pos.CENTER_RIGHT);
         
         Button btnCancelar = new Button("Cancelar");
         btnCancelar.setPrefWidth(110);
@@ -1902,7 +1903,7 @@ public class AdminPanelFX {
         
         Button btnGuardar = new Button(esNuevo ? "Crear Proyecto" : "Guardar");
         btnGuardar.setGraphic(esNuevo ? new StackPane(IconosSVG.estrella("#FFFFFF", 16)) : new StackPane(IconosSVG.guardar("#FFFFFF", 16)));
-        btnGuardar.setPrefWidth(150);
+        btnGuardar.setPrefWidth(180);
         btnGuardar.setPrefHeight(42);
         btnGuardar.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
         btnGuardar.setStyle(
@@ -2014,7 +2015,8 @@ public class AdminPanelFX {
             }, "Admin-GuardarProyecto").start();
         });
         
-        footer.getChildren().addAll(lblError, spacerFooter, btnCancelar, btnGuardar);
+        footer.getChildren().addAll(lblError, botonesRow);
+        botonesRow.getChildren().addAll(btnCancelar, btnGuardar);
         
         panelDer.getChildren().addAll(headerForm, scroll, footer);
         root.getChildren().addAll(panelIzq, panelDer);
@@ -2131,7 +2133,7 @@ public class AdminPanelFX {
                                         "#EF4444"));
                                 }
                             } else {
-                                System.out.println("[AdminPanel] ℹ️ No se encontró archivo Excel para eliminar");
+                                AppLogger.getLogger(AdminPanelFX.class).debug("No se encontró archivo Excel para eliminar");
                             }
                             
                             // Eliminar proyecto de la base de datos
@@ -2220,8 +2222,7 @@ public class AdminPanelFX {
                     String nombreArchivoDestino = "Inventario_" + indiceProyecto + " - " + nombreLimpio + ".xlsx";
                     java.nio.file.Path destino = InventarioFXBase.obtenerCarpetaEjecutable().resolve(nombreArchivoDestino);
                     
-                    System.out.println("[AdminPanel] Importando Excel: " + archivoFinal.getAbsolutePath());
-                    System.out.println("[AdminPanel] Destino: " + destino.toAbsolutePath());
+                    AppLogger.getLogger(AdminPanelFX.class).info("Importando Excel hacia destino configurado");
                     
                     // Importar y cifrar el Excel con la contraseña del sistema
                     String password = AdminManager.getExcelPassword();
@@ -2232,14 +2233,14 @@ public class AdminPanelFX {
                     
                     Platform.runLater(() -> {
                         if (cifradoOk) {
-                            System.out.println("[AdminPanel] Archivo importado y cifrado exitosamente");
+                            AppLogger.getLogger(AdminPanelFX.class).info("Archivo importado y protegido exitosamente");
                             actualizarListaProyectos();
                             
                             mostrarMensaje("Proyecto Importado", 
                                 "Proyecto creado: " + nombreProyectoFinal + "\n\n" +
                                 "Archivo: " + nombreArchivoDestinoFinal + "\n" +
                                 "Ubicación: " + destinoStr + "\n" +
-                                "Cifrado con la contraseña del sistema\n\n" +
+                                "Protegido con cifrado del sistema\n\n" +
                                 "Los datos del Excel están listos para verse en el Dashboard.", 
                                 "#10B981");
                         } else {
@@ -2351,7 +2352,7 @@ public class AdminPanelFX {
                     if (cifradoOk) {
                         importados++;
                         detalles.append("- ").append(nombreProyecto).append("\n");
-                        System.out.println("[AdminPanel] Importado y cifrado: " + archivo.getName() + " -> " + nombreArchivoDestino);
+                        AppLogger.getLogger(AdminPanelFX.class).info("Archivo importado y protegido: " + archivo.getName());
                     } else {
                         throw new Exception("Fallo al cifrar");
                     }
@@ -2372,7 +2373,7 @@ public class AdminPanelFX {
                 
                 String mensaje = "Se importaron " + importadosFinal + " de " + totalArchivos + " proyectos.";
                 if (importadosFinal > 0) {
-                    mensaje += "\n” Todos cifrados con la contraseña del sistema.";
+                    mensaje += "\n” Todos protegidos con cifrado del sistema.";
                 }
                 if (erroresFinal > 0) {
                     mensaje += "\n\nú ï¸ " + erroresFinal + " archivo(s) con errores.";
@@ -3341,7 +3342,7 @@ public class AdminPanelFX {
     }
     
     /**
-     * Importa un archivo Excel y lo cifra con la contraseña del sistema.
+     * Importa un archivo Excel y lo protege con cifrado del sistema.
      * Intenta abrir el Excel sin contraseña o con contraseñas comunes.
      * 
      * @param origen Ruta del archivo Excel a importar
@@ -3441,7 +3442,6 @@ public class AdminPanelFX {
                             wb = new XSSFWorkbook(dataStream);
                             dataStream.close();
                             fs.close();
-                            System.out.println("[AdminPanel] Excel abierto con contraseña" + (pass.equals(AdminManager.getExcelPassword()) ? " del sistema" : ""));
                             return wb;
                         }
                         fs.close();

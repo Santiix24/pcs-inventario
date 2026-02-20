@@ -33,7 +33,7 @@ import inventario.fx.config.PortablePaths;
  * @version 1.0
  * @since 2026-01-14
  */
-public class DatabaseEncryption {
+public class DatabaseEncryption implements AutoCloseable {
 
     private static final String ALGORITHM = "AES/GCM/NoPadding";
     private static final int KEY_SIZE = 256;
@@ -42,7 +42,7 @@ public class DatabaseEncryption {
     private static final String KEY_DIR = inventario.fx.config.PortablePaths.getSecurityDir().toString();
     private static final String KEY_FILE = "encryption.key";
 
-    private SecretKey secretKey;
+    private volatile SecretKey secretKey;
     private final SecureRandom secureRandom;
 
     /**
@@ -178,7 +178,7 @@ public class DatabaseEncryption {
             // Proteger archivo de clave
             protegerArchivoClave(keyFile);
 
-            System.out.println("🔑 Nueva clave de encriptación generada y protegida");
+            System.err.println("[DatabaseEncryption] Clave de encriptación inicializada");
             return newKey;
         }
     }
@@ -235,6 +235,40 @@ public class DatabaseEncryption {
             return decoded.length > GCM_IV_LENGTH;
         } catch (IllegalArgumentException e) {
             return false;
+        }
+    }
+
+    /**
+     * Limpia la clave secreta de memoria de forma segura.
+     * Después de llamar a este método, la instancia no puede usarse para encriptar/desencriptar.
+     */
+    @Override
+    public void close() {
+        destroy();
+    }
+
+    /**
+     * Destruye la clave secreta sobrescribiendo el material criptográfico en memoria.
+     */
+    public void destroy() {
+        if (secretKey != null) {
+            try {
+                // Si la clave implementa Destroyable, usarla
+                if (secretKey instanceof javax.security.auth.Destroyable) {
+                    javax.security.auth.Destroyable destroyable = (javax.security.auth.Destroyable) secretKey;
+                    if (!destroyable.isDestroyed()) {
+                        destroyable.destroy();
+                    }
+                }
+            } catch (javax.security.auth.DestroyFailedException e) {
+                // Fallback: sobrescribir bytes del encoded key
+                byte[] encoded = secretKey.getEncoded();
+                if (encoded != null) {
+                    SecurityManager.limpiarDatos(encoded);
+                }
+            } finally {
+                secretKey = null;
+            }
         }
     }
 }

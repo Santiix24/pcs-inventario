@@ -83,7 +83,7 @@ public abstract class InventarioFXBase {
             "8. Fondo nacional del ahorro - Comercialización de equipos"
     };
 
-    public static String CURRENT_PROJECT = PROYECTOS_NOMBRE[0];
+    public static volatile String CURRENT_PROJECT = PROYECTOS_NOMBRE[0];
 
     static {
         Security.addProvider(new BouncyCastleProvider());
@@ -139,9 +139,9 @@ public abstract class InventarioFXBase {
 
     public static Path obtenerRutaExcel(String proyecto) {
         // Obtener el índice del proyecto (ej: "1" de "1. Secretaría de Educación")
-        String indice = proyecto.split("\\.")[0];
-        // Obtener el nombre del proyecto sin el índice
-        String nombreProyecto = proyecto.substring(3).trim();
+        String indice = proyecto.split("\\.")[0].trim();
+        // Obtener el nombre del proyecto sin el índice (funciona para índices de 1 o 2+ dígitos)
+        String nombreProyecto = proyecto.replaceFirst("^\\d+\\.\\s*", "").trim();
         
         // Buscar el proyecto en AdminManager para obtener la descripción
         int idx = Integer.parseInt(indice) - 1;
@@ -191,7 +191,7 @@ public abstract class InventarioFXBase {
     }
 
     protected static String limpiarNombreProyecto(String proyecto) {
-        return proyecto.substring(3).trim();
+        return proyecto.replaceFirst("^\\d+\\.\\s*", "").trim();
     }
 
     /** Formatea un Date con el formatter thread-safe FORMATO_FECHA */
@@ -448,6 +448,8 @@ public abstract class InventarioFXBase {
 
     protected static boolean guardarEnExcelCifradoProyecto(InfoPC i) {
         Path rutaExcel = obtenerRutaExcel(CURRENT_PROJECT);
+        logger.info("[Excel] Guardando inventario en: " + rutaExcel);
+        logger.info("[Excel] Proyecto actual: " + CURRENT_PROJECT);
         Path temp = null;
         XSSFWorkbook wb = null;
         try {
@@ -532,7 +534,7 @@ public abstract class InventarioFXBase {
             return reemplazarArchivoSinBackup(rutaExcel, temp);
 
         } catch (Exception e) {
-            logger.error("Error: " + e.getMessage(), e);
+            logger.error("[Excel] Error guardando inventario en " + rutaExcel + ": " + e.getMessage(), e);
             return false;
         } finally {
             if (temp != null && Files.exists(temp)) {
@@ -602,7 +604,21 @@ public abstract class InventarioFXBase {
     }
 
     public static XSSFWorkbook abrirCifradoProyecto(Path ruta) {
-        return abrirCifrado(ruta, getExcelPassword());
+        XSSFWorkbook wb = abrirCifrado(ruta, getExcelPassword());
+        if (wb == null) {
+            // La contraseña principal no funcionó.
+            // Intentar con el respaldo (cubre el caso donde encryption.key fue regenerada
+            // pero el archivo excel_pw.dat sobrevivió con la contraseña original).
+            String backupPw = AdminManager.getExcelPasswordFromBackup();
+            if (backupPw != null && !backupPw.equals(getExcelPassword())) {
+                wb = abrirCifrado(ruta, backupPw);
+                if (wb != null) {
+                    logger.warn("[InventarioFXBase] Archivo abierto con contraseña de respaldo: "
+                        + ruta.getFileName());
+                }
+            }
+        }
+        return wb;
     }
     
     /**

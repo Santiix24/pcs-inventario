@@ -113,15 +113,56 @@ public class TemaManager {
     // ═══════════════════════════════════════════════════════════════════════════
     
     private TemaManager() {
-        // Inicialización vacía - la carga real se hace en initialize()
+        // Inicialización vacía - la carga real se hace en ensureInitialized()
     }
-    
+
+    // ─── Rutas al archivo portable de preferencias ─────────────────────────────
+    private static java.nio.file.Path getConfigFile() {
+        return inventario.fx.config.PortablePaths.getConfigProperties();
+    }
+
+    private static java.util.Properties loadProps() {
+        java.util.Properties p = new java.util.Properties();
+        java.nio.file.Path f = getConfigFile();
+        if (java.nio.file.Files.exists(f)) {
+            try (java.io.InputStream in = java.nio.file.Files.newInputStream(f)) {
+                p.load(in);
+            } catch (Exception e) {
+                System.err.println("⚠ TemaManager: error leyendo config.properties: " + e.getMessage());
+            }
+        }
+        return p;
+    }
+
+    private static void saveProps(java.util.Properties p) {
+        java.nio.file.Path f = getConfigFile();
+        try {
+            java.nio.file.Files.createDirectories(f.getParent());
+            try (java.io.OutputStream out = java.nio.file.Files.newOutputStream(f)) {
+                p.store(out, "SELCOMP — Preferencias portables");
+            }
+        } catch (Exception e) {
+            System.err.println("⚠ TemaManager: error guardando config.properties: " + e.getMessage());
+        }
+    }
+
     private static void ensureInitialized() {
         if (!initialized) {
             initialized = true;
             try {
-                prefs = Preferences.userNodeForPackage(TemaManager.class);
-                darkMode = prefs.getBoolean(PREF_KEY_DARK_MODE, true);
+                java.util.Properties p = loadProps();
+                // Migración: si hay valor en Preferences (Registro), usarlo y migrar
+                if (!p.containsKey(PREF_KEY_DARK_MODE)) {
+                    try {
+                        prefs = Preferences.userNodeForPackage(TemaManager.class);
+                        darkMode = prefs.getBoolean(PREF_KEY_DARK_MODE, true);
+                        prefs.remove(PREF_KEY_DARK_MODE);
+                    } catch (Exception ex) {
+                        darkMode = true;
+                    }
+                } else {
+                    darkMode = Boolean.parseBoolean(p.getProperty(PREF_KEY_DARK_MODE, "true"));
+                }
             } catch (Exception e) {
                 System.err.println("⚠ No se pudieron cargar preferencias de tema: " + e.getMessage());
                 darkMode = true;
@@ -180,9 +221,9 @@ public class TemaManager {
     
     private static void guardarPreferencia() {
         try {
-            if (prefs != null) {
-                prefs.putBoolean(PREF_KEY_DARK_MODE, darkMode);
-            }
+            java.util.Properties p = loadProps();
+            p.setProperty(PREF_KEY_DARK_MODE, String.valueOf(darkMode));
+            saveProps(p);
         } catch (Exception e) {
             System.err.println("⚠ No se pudo guardar preferencia de tema: " + e.getMessage());
         }

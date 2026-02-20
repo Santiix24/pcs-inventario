@@ -36,6 +36,15 @@ public class NotificacionesFX {
     public static void success(StackPane contenedor, String titulo, String mensaje) {
         mostrarNotificacion(contenedor, titulo, mensaje, TemaManager.COLOR_SUCCESS);
     }
+
+    /**
+     * Notificación de éxito con un botón de acción (ej. "Abrir carpeta").
+     * El botón aparece junto al texto y ejecuta el Runnable proporcionado.
+     */
+    public static void successConAccion(StackPane contenedor, String titulo, String mensaje,
+                                         String textoAccion, Runnable accion) {
+        mostrarNotificacionConAccion(contenedor, titulo, mensaje, TemaManager.COLOR_SUCCESS, textoAccion, accion);
+    }
     
     public static void error(StackPane contenedor, String titulo, String mensaje) {
         mostrarNotificacion(contenedor, titulo, mensaje, TemaManager.COLOR_DANGER);
@@ -224,6 +233,146 @@ public class NotificacionesFX {
             fadeIn.setToValue(1);
             fadeIn.setInterpolator(AnimacionesFX.EASE_OUT_CUBIC);
             
+            new ParallelTransition(slideIn, fadeIn).play();
+            autoCerrar.play();
+        });
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  NOTIFICACIÓN CON BOTÓN DE ACCIÓN
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Muestra una notificación toast con un botón de acción (ej. "Abrir carpeta").
+     * Se auto-cierra en 6 segundos (más tiempo porque hay acción).
+     */
+    public static void mostrarNotificacionConAccion(StackPane contenedor, String titulo, String mensaje,
+                                                     String color, String textoAccion, Runnable accion) {
+        Platform.runLater(() -> {
+            VBox stack = obtenerStack(contenedor);
+
+            while (stack.getChildren().size() >= MAX_NOTIFICACIONES) {
+                stack.getChildren().remove(0);
+            }
+
+            HBox container = new HBox(14);
+            container.setMaxWidth(420);
+            container.setMinHeight(68);
+            container.setMaxHeight(100);
+            container.setAlignment(Pos.CENTER_LEFT);
+            container.setPadding(new Insets(14, 18, 14, 18));
+
+            String bgColor = TemaManager.getSurface();
+            String borderColor = TemaManager.isDarkMode() ? color : color + "60";
+            String shadowColor = TemaManager.isDarkMode() ? "rgba(0, 0, 0, 0.4)" : "rgba(0, 0, 0, 0.15)";
+
+            container.setStyle(
+                "-fx-background-color: " + bgColor + ";" +
+                "-fx-background-radius: 14;" +
+                "-fx-border-radius: 14;" +
+                "-fx-border-color: " + borderColor + ";" +
+                "-fx-border-width: 1.5;" +
+                "-fx-effect: dropshadow(gaussian, " + shadowColor + ", 20, 0.15, 0, 4);"
+            );
+
+            // Icono
+            SVGPath iconoLucide = IconosSVG.crearIconoCheckCircle(color, 20);
+            StackPane iconWrapper = new StackPane(iconoLucide);
+            iconWrapper.setPrefSize(42, 42);
+            iconWrapper.setStyle(
+                "-fx-background-color: " + color + "20;" +
+                "-fx-background-radius: 21;"
+            );
+
+            // Textos + botón de acción
+            VBox textos = new VBox(3);
+            textos.setAlignment(Pos.CENTER_LEFT);
+            textos.setMaxWidth(260);
+
+            Label lblTitulo = new Label(titulo);
+            lblTitulo.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
+            lblTitulo.setTextFill(Color.web(TemaManager.getText()));
+            lblTitulo.setMaxWidth(260);
+
+            Label lblMensaje = new Label(mensaje);
+            lblMensaje.setFont(Font.font("Segoe UI", 11.5));
+            lblMensaje.setTextFill(Color.web(TemaManager.getTextMuted()));
+            lblMensaje.setWrapText(true);
+            lblMensaje.setMaxHeight(32);
+            lblMensaje.setMaxWidth(260);
+
+            // Botón de acción (ej. "Abrir carpeta")
+            Label btnAccion = new Label(textoAccion);
+            btnAccion.setFont(Font.font("Segoe UI", FontWeight.SEMI_BOLD, 12));
+            btnAccion.setTextFill(Color.web(color));
+            btnAccion.setCursor(javafx.scene.Cursor.HAND);
+            btnAccion.setUnderline(true);
+            btnAccion.setOnMouseClicked(e -> {
+                try { accion.run(); } catch (Exception ignored) {}
+            });
+            btnAccion.setOnMouseEntered(e -> btnAccion.setOpacity(0.7));
+            btnAccion.setOnMouseExited(e -> btnAccion.setOpacity(1.0));
+
+            textos.getChildren().addAll(lblTitulo, lblMensaje, btnAccion);
+
+            Region spacer = new Region();
+            HBox.setHgrow(spacer, Priority.ALWAYS);
+
+            // Botón cerrar
+            Button btnCerrar = new Button();
+            btnCerrar.setGraphic(IconosSVG.crearIconoX(TemaManager.getTextMuted(), 18));
+            btnCerrar.setPrefSize(28, 28);
+            btnCerrar.setStyle(
+                "-fx-background-color: transparent;" +
+                "-fx-cursor: hand;" +
+                "-fx-background-radius: 14;" +
+                "-fx-padding: 0;"
+            );
+
+            container.getChildren().addAll(iconWrapper, textos, spacer, btnCerrar);
+
+            // Animación entrada
+            container.setTranslateX(40);
+            container.setOpacity(0);
+
+            Runnable cerrarConAnimacion = () -> {
+                TranslateTransition slideOut = new TranslateTransition(Duration.millis(250), container);
+                slideOut.setToX(40);
+                slideOut.setInterpolator(AnimacionesFX.EASE_IN_CUBIC);
+
+                FadeTransition fadeOut = new FadeTransition(Duration.millis(250), container);
+                fadeOut.setToValue(0);
+                fadeOut.setInterpolator(AnimacionesFX.EASE_IN_CUBIC);
+
+                ParallelTransition salida = new ParallelTransition(slideOut, fadeOut);
+                salida.setOnFinished(ev -> {
+                    stack.getChildren().remove(container);
+                    if (stack.getChildren().isEmpty()) {
+                        contenedor.getChildren().remove(stack);
+                        stackContainers.remove(contenedor);
+                    }
+                });
+                salida.play();
+            };
+
+            btnCerrar.setOnAction(e -> cerrarConAnimacion.run());
+
+            // 6 segundos para dar tiempo a hacer clic
+            PauseTransition autoCerrar = new PauseTransition(Duration.millis(6000));
+            autoCerrar.setOnFinished(e -> cerrarConAnimacion.run());
+
+            stack.getChildren().add(container);
+
+            TranslateTransition slideIn = new TranslateTransition(Duration.millis(DURACION_ANIMACION), container);
+            slideIn.setFromX(40);
+            slideIn.setToX(0);
+            slideIn.setInterpolator(AnimacionesFX.EASE_OUT_CUBIC);
+
+            FadeTransition fadeIn = new FadeTransition(Duration.millis(DURACION_ANIMACION), container);
+            fadeIn.setFromValue(0);
+            fadeIn.setToValue(1);
+            fadeIn.setInterpolator(AnimacionesFX.EASE_OUT_CUBIC);
+
             new ParallelTransition(slideIn, fadeIn).play();
             autoCerrar.play();
         });

@@ -83,6 +83,9 @@ public class AdminManager {
     /** Fuente de intentos de login para protección anti-brute-force. */
     private static final String LOGIN_SOURCE = "admin_login";
     private static final Preferences prefs = Preferences.userNodeForPackage(AdminManager.class);
+    /** Archivo portátil donde se guarda el hash de la contraseña admin (en .datos/security/). */
+    private static final java.nio.file.Path ADMIN_KEY_FILE =
+        inventario.fx.config.PortablePaths.getSecurityDir().resolve("admin.key");
     private static ConfigRepository configRepo = new ConfigRepository();
     private static ProyectoRepository proyectoRepo;
     private static LogAccesoRepository logRepo;
@@ -250,12 +253,93 @@ public class AdminManager {
     // AUTENTICACIÓN SEGURA (PBKDF2 + Protección anti-brute-force)
     // ════════════════════════════════════════════════════════════════════════════
     
+    // ────────────────────────────────────────────────────────────────────────────
+    // Almacenamiento portátil de contraseña — cifrado AES-256-GCM en SQLite
+    // (doble capa: PBKDF2 del hash + AES-256-GCM en reposo)
+    // ────────────────────────────────────────────────────────────────────────────
+
+    private static final String CFG_ADMIN_HASH = "security.admin.hash";
+
+    /** Lee el hash de la contraseña admin desde SQLite cifrado. Con migración automática desde archivo plano. */
+    private static String readAdminKey() {
+        // 1. Leer desde configRepo cifrado (ubicación segura)
+        java.util.Optional<String> fromRepo = configRepo.obtener(CFG_ADMIN_HASH);
+        if (fromRepo.isPresent()) return fromRepo.get();
+
+        // 2. Migración: si existe el archivo plano admin.key, migrar y eliminar
+        if (java.nio.file.Files.exists(ADMIN_KEY_FILE)) {
+            try {
+                String hash = java.nio.file.Files.readString(ADMIN_KEY_FILE).trim();
+                if (!hash.isEmpty()) {
+                    configRepo.guardar(CFG_ADMIN_HASH, hash, "seguridad", "Hash admin (PBKDF2-SHA256)", true);
+                    java.nio.file.Files.deleteIfExists(ADMIN_KEY_FILE);
+                    AppLogger.getLogger(AdminManager.class).info("[AdminManager] admin.key migrado a base de datos cifrada");
+                    return hash;
+                }
+            } catch (Exception e) {
+                AppLogger.getLogger(AdminManager.class).warn("[AdminManager] Error migrando admin.key: " + e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /** Escribe el hash de la contraseña admin en SQLite cifrado (AES-256-GCM).
+     *  Si la BD no está lista aún, guarda en admin.key como respaldo temporal.
+     *  @throws RuntimeException si no se pudo guardar por ningún medio. */
+    private static void writeAdminKey(String hash) {
+        // 1. Intentar guardar en SQLite cifrado (preferido)
+        boolean guardadoEnDB = false;
+        try {
+            configRepo.guardar(CFG_ADMIN_HASH, hash, "seguridad", "Hash admin (PBKDF2-SHA256)", true);
+            // Verificar que realmente se guardó
+            String verificacion = configRepo.obtener(CFG_ADMIN_HASH).orElse(null);
+            guardadoEnDB = hash.equals(verificacion);
+        } catch (Exception e) {
+            AppLogger.getLogger(AdminManager.class).warn("[AdminManager] configRepo no disponible aún, usando respaldo: " + e.getMessage());
+        }
+
+        if (!guardadoEnDB) {
+            // 2. Fallback: guardar en admin.key (texto plano del hash PBKDF2, sin texto plano de contraseña)
+            try {
+                java.nio.file.Files.createDirectories(ADMIN_KEY_FILE.getParent());
+                java.nio.file.Files.writeString(ADMIN_KEY_FILE, hash);
+                inventario.fx.config.PortablePaths.protegerArchivo(ADMIN_KEY_FILE);
+                AppLogger.getLogger(AdminManager.class).info("[AdminManager] Contraseña guardada en admin.key (respaldo)");
+                guardadoEnDB = true; // Se guardó en respaldo
+            } catch (Exception e2) {
+                AppLogger.getLogger(AdminManager.class).warn("[AdminManager] Error guardando admin.key: " + e2.getMessage());
+            }
+        } else {
+            // Eliminar admin.key residual si el guardado en DB fue exitoso
+            try { java.nio.file.Files.deleteIfExists(ADMIN_KEY_FILE); } catch (Exception ignored) {}
+        }
+
+        if (!guardadoEnDB) {
+            throw new RuntimeException("No se pudo guardar la contraseña en ningún almacenamiento disponible.");
+        }
+    }
+
     /**
      * Verifica si es la primera ejecución y el administrador debe configurar su contraseña.
      * @return true si no hay contraseña almacenada y se necesita configuración inicial
      */
     public static boolean needsInitialPasswordSetup() {
-        return prefs.get(PREF_ADMIN_PASSWORD, null) == null;
+        ensureBruteForceInitialized();
+        return readAdminKey() == null;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // Persistencia de contadores anti-brute-force
+    // ────────────────────────────────────────────────────────────────────────────
+
+    private static volatile boolean bfInitialized = false;
+
+    /** Inicializa la persistencia de brute-force una sola vez al arrancar. */
+    private static synchronized void ensureBruteForceInitialized() {
+        if (bfInitialized) return;
+        bfInitialized = true;
+        java.nio.file.Path bfFile = inventario.fx.config.PortablePaths.getSecurityDir().resolve("bf.dat");
+        SecurityManager.inicializarPersistencia(bfFile);
     }
     
     /**
@@ -277,8 +361,13 @@ public class AdminManager {
         }
         
         String hash = SecurityManager.hashPassword(password);
-        prefs.put(PREF_ADMIN_PASSWORD, hash);
-        System.out.println("[AdminManager] Contraseña inicial configurada con PBKDF2");
+        try {
+            writeAdminKey(hash);
+        } catch (RuntimeException e) {
+            return new SecurityManager.ResultadoValidacion(false,
+                "Error al guardar la contraseña. " + e.getMessage(), 0);
+        }
+        AppLogger.getLogger(AdminManager.class).info("Contraseña inicial configurada con hash seguro");
         registrarLog("Setup inicial", "Contraseña de administrador configurada por primera vez");
         
         return new SecurityManager.ResultadoValidacion(true, 
@@ -291,7 +380,7 @@ public class AdminManager {
      * @return Hash almacenado o null si no hay contraseña configurada
      */
     private static String getAdminPasswordHash() {
-        String stored = prefs.get(PREF_ADMIN_PASSWORD, null);
+        String stored = readAdminKey();
         
         if (stored == null) {
             // No hay contraseña configurada — requiere setup inicial
@@ -301,8 +390,8 @@ public class AdminManager {
         // Migración automática: si está en texto plano, hashearla
         if (!SecurityManager.isHashModerno(stored)) {
             String hash = SecurityManager.hashPassword(stored);
-            prefs.put(PREF_ADMIN_PASSWORD, hash);
-            System.out.println("[AdminManager] Contraseña legacy migrada a PBKDF2");
+            writeAdminKey(hash);
+            AppLogger.getLogger(AdminManager.class).info("Contraseña migrada a formato seguro");
             return hash;
         }
         
@@ -316,7 +405,7 @@ public class AdminManager {
      * @return Resultado del intento de login
      */
     public static LoginResult login(String password) {
-        // Verificar si la cuenta está bloqueada por brute force
+        ensureBruteForceInitialized();
         if (SecurityManager.estaBloqueado(LOGIN_SOURCE)) {
             long segundosRestantes = SecurityManager.getTiempoBloqueoRestante(LOGIN_SOURCE);
             registrarLog("Login bloqueado", "Cuenta bloqueada por intentos fallidos — " + segundosRestantes + "s restantes");
@@ -448,7 +537,7 @@ public class AdminManager {
         
         // Hashear y guardar nueva contraseña
         String nuevoHash = SecurityManager.hashPassword(contrasenaNueva);
-        prefs.put(PREF_ADMIN_PASSWORD, nuevoHash);
+        writeAdminKey(nuevoHash);
         registrarLog("Cambio contraseña", "Contraseña de administrador actualizada exitosamente");
         
         return new SecurityManager.ResultadoValidacion(true, "Contraseña actualizada exitosamente", validacion.getFortaleza());
@@ -459,31 +548,125 @@ public class AdminManager {
     // ════════════════════════════════════════════════════════════════════════════
     
     private static final String PREF_EXCEL_PASSWORD = "excel_password";
+    /** Caché en memoria para garantizar que la misma contraseña se use durante toda la sesión. */
+    private static volatile String cachedExcelPassword = null;
+
+    /**
+     * Archivo de respaldo de la contraseña Excel (independiente del SQLite y de encryption.key).
+     * Permite recuperar automáticamente la contraseña si el SQLite se corrompe o si
+     * encryption.key es regenerada (p.ej. al mover el .exe sin mover .datos/).
+     */
+    private static final Path EXCEL_PW_BACKUP_FILE =
+        PortablePaths.getSecurityDir().resolve("excel_pw.dat");
+
+    /** Clave de ofuscación XOR (no criptográfica — solo previene lectura casual).
+     *  El Excel sí está fuertemente cifrado con AES-256; esto es una capa adicional minor. */
+    private static final byte[] OBFUSCATION_KEY =
+        { 0x53, 0x45, 0x4C, 0x43, 0x4F, 0x4D, 0x50, 0x21 }; // "SELCOMP!"
     
     /**
      * Obtiene la contraseña actual para cifrar archivos Excel.
-     * Si no existe, genera una contraseña aleatoria segura y la almacena.
+     * Orden de prioridad:
+     *  1. SQLite cifrado (fuente principal)
+     *  2. Preferences legacy (migración)
+     *  3. Archivo de respaldo excel_pw.dat (recuperación: cuando encryption.key fue regenerada
+     *     y el SQLite perdió la contraseña, pero el .dat sobrevivió)
+     *  4. Generar nueva contraseña aleatoria (primera ejecución o recuperación imposible)
+     *
+     * En todos los casos exitosos se actualiza el respaldo para mantener la coherencia.
      */
     public static String getExcelPassword() {
-        // Buscar primero en SQLite encriptado, luego en Preferences
-        return configRepo.obtener("excel.password")
-            .orElseGet(() -> {
-                // Si no está en SQLite, intentar migrar desde Preferences
-                String oldPassword = prefs.get(PREF_EXCEL_PASSWORD, null);
-                if (oldPassword != null && !oldPassword.isEmpty()) {
-                    configRepo.guardar("excel.password", oldPassword, "seguridad", 
-                        "Contraseña de cifrado de Excel (migrada)", true);
-                    // Limpiar de Preferences después de migrar
-                    prefs.remove(PREF_EXCEL_PASSWORD);
-                    return oldPassword;
-                }
-                // Primera ejecución: generar contraseña aleatoria segura
-                String generada = generarPasswordSegura(16);
-                configRepo.guardar("excel.password", generada, "seguridad",
-                    "Contraseña de cifrado de Excel (generada automáticamente)", true);
-                System.out.println("[AdminManager] Contraseña de Excel generada automáticamente");
-                return generada;
-            });
+        if (cachedExcelPassword != null) return cachedExcelPassword;
+        synchronized (AdminManager.class) {
+            if (cachedExcelPassword != null) return cachedExcelPassword;
+
+            // 1. SQLite (fuente principal)
+            java.util.Optional<String> fromSQLite = configRepo.obtener("excel.password");
+            if (fromSQLite.isPresent()) {
+                cachedExcelPassword = fromSQLite.get();
+                saveExcelPasswordBackup(cachedExcelPassword); // mantener respaldo fresco
+                return cachedExcelPassword;
+            }
+
+            // 2. Preferences legacy (migración desde versiones anteriores)
+            String oldPassword = prefs.get(PREF_EXCEL_PASSWORD, null);
+            if (oldPassword != null && !oldPassword.isEmpty()) {
+                configRepo.guardar("excel.password", oldPassword, "seguridad",
+                    "Contraseña de cifrado de Excel (migrada)", true);
+                prefs.remove(PREF_EXCEL_PASSWORD);
+                cachedExcelPassword = oldPassword;
+                saveExcelPasswordBackup(cachedExcelPassword);
+                return cachedExcelPassword;
+            }
+
+            // 3. Archivo de respaldo (recuperación automática cuando encryption.key fue
+            //    regenerada y el SQLite perdió la contraseña guardada)
+            String fromBackup = getExcelPasswordFromBackup();
+            if (fromBackup != null) {
+                // Restaurar al SQLite para que futuras ejecuciones no necesiten el respaldo
+                configRepo.guardar("excel.password", fromBackup, "seguridad",
+                    "Contraseña de cifrado de Excel (recuperada desde respaldo)", true);
+                cachedExcelPassword = fromBackup;
+                AppLogger.getLogger(AdminManager.class).info(
+                    "[AdminManager] Contraseña Excel recuperada desde respaldo — SQLite restaurado");
+                return cachedExcelPassword;
+            }
+
+            // 4. Primera ejecución real: generar contraseña nueva
+            String generada = generarPasswordSegura(16);
+            configRepo.guardar("excel.password", generada, "seguridad",
+                "Contraseña de cifrado de Excel (generada automáticamente)", true);
+            cachedExcelPassword = generada;
+            saveExcelPasswordBackup(cachedExcelPassword);
+            AppLogger.getLogger(AdminManager.class).info("Credencial de cifrado Excel inicializada");
+            return cachedExcelPassword;
+        }
+    }
+
+    /**
+     * Guarda la contraseña Excel en un archivo de respaldo independiente del SQLite.
+     * Usa ofuscación XOR + Base64 (no criptografía fuerte, pero el Excel sí está
+     * protegido con AES-256 — este archivo solo guarda la clave de acceso).
+     */
+    private static void saveExcelPasswordBackup(String password) {
+        try {
+            Path dir = EXCEL_PW_BACKUP_FILE.getParent();
+            if (!Files.exists(dir)) Files.createDirectories(dir);
+            byte[] pw = password.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] encoded = new byte[pw.length];
+            for (int i = 0; i < pw.length; i++) {
+                encoded[i] = (byte) (pw[i] ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.length]);
+            }
+            Files.write(EXCEL_PW_BACKUP_FILE,
+                java.util.Base64.getEncoder().encode(encoded),
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            PortablePaths.protegerArchivo(EXCEL_PW_BACKUP_FILE);
+        } catch (Exception e) {
+            AppLogger.getLogger(AdminManager.class).warn(
+                "[AdminManager] No se pudo guardar respaldo de contraseña Excel: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Lee la contraseña Excel desde el archivo de respaldo.
+     * Devuelve null si el archivo no existe o es ilegible.
+     */
+    static String getExcelPasswordFromBackup() {
+        try {
+            if (!Files.exists(EXCEL_PW_BACKUP_FILE)) return null;
+            byte[] encoded = java.util.Base64.getDecoder()
+                .decode(Files.readAllBytes(EXCEL_PW_BACKUP_FILE));
+            byte[] pw = new byte[encoded.length];
+            for (int i = 0; i < encoded.length; i++) {
+                pw[i] = (byte) (encoded[i] ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.length]);
+            }
+            String result = new String(pw, java.nio.charset.StandardCharsets.UTF_8).trim();
+            return result.isEmpty() ? null : result;
+        } catch (Exception e) {
+            AppLogger.getLogger(AdminManager.class).warn(
+                "[AdminManager] No se pudo leer respaldo de contraseña Excel: " + e.getMessage());
+            return null;
+        }
     }
     
     /**
@@ -531,13 +714,21 @@ public class AdminManager {
     }
     
     /**
-     * Cambia la contraseña de cifrado de Excel
+     * Cambia la contraseña de cifrado de Excel.
+     * Usa comparación en tiempo constante para prevenir timing attacks.
      */
     public static boolean cambiarExcelPassword(String passwordActual, String passwordNueva) {
         String actual = getExcelPassword();
-        if (actual.equals(passwordActual)) {
-            configRepo.guardar("excel.password", passwordNueva, "seguridad", 
+        // Comparación en tiempo constante para prevenir timing attacks
+        boolean coincide = java.security.MessageDigest.isEqual(
+            actual.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            passwordActual.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        );
+        if (coincide) {
+            configRepo.guardar("excel.password", passwordNueva, "seguridad",
                 "Contraseña de cifrado de Excel", true);
+            cachedExcelPassword = passwordNueva; // Actualizar caché
+            saveExcelPasswordBackup(passwordNueva); // Actualizar respaldo también
             registrarLog("Seguridad", "Contraseña de Excel actualizada");
             return true;
         }
@@ -557,6 +748,7 @@ public class AdminManager {
         }
         configRepo.guardar("excel.password", passwordNueva, "seguridad",
             "Contraseña de cifrado de Excel", true);
+        cachedExcelPassword = passwordNueva; // Actualizar caché
         registrarLog("Seguridad", "Contraseña de Excel actualizada (método legacy)");
     }
     
@@ -574,6 +766,7 @@ public class AdminManager {
         String nueva = generarPasswordSegura(16);
         configRepo.guardar("excel.password", nueva, "seguridad",
             "Contraseña de cifrado de Excel (regenerada)", true);
+        cachedExcelPassword = nueva; // Actualizar caché
         registrarLog("Seguridad", "Contraseña de Excel regenerada");
         return nueva;
     }
@@ -1157,12 +1350,19 @@ public class AdminManager {
     
     private static final int MAX_COLORES_RECIENTES = 5;
     private static final String PREF_COLORES_RECIENTES = "colores_recientes";
+    private static final String CFG_COLORES_RECIENTES = "ui.colores.recientes";
     
     /**
      * Obtiene los colores personalizados usados recientemente
      */
     public static java.util.List<String> getColoresRecientes() {
-        String data = prefs.get(PREF_COLORES_RECIENTES, "");
+        // Migración desde Preferences al primer acceso
+        String legacy = prefs.get(PREF_COLORES_RECIENTES, "");
+        if (!legacy.isEmpty() && !configRepo.existe(CFG_COLORES_RECIENTES)) {
+            configRepo.guardar(CFG_COLORES_RECIENTES, legacy);
+            prefs.remove(PREF_COLORES_RECIENTES);
+        }
+        String data = configRepo.obtener(CFG_COLORES_RECIENTES).orElse("");
         java.util.List<String> colores = new java.util.ArrayList<>();
         if (!data.isEmpty()) {
             for (String c : data.split(",")) {
@@ -1201,8 +1401,8 @@ public class AdminManager {
             recientes.remove(recientes.size() - 1);
         }
         
-        // Guardar
-        prefs.put(PREF_COLORES_RECIENTES, String.join(",", recientes));
+        // Guardar en SQLite portable
+        configRepo.guardar(CFG_COLORES_RECIENTES, String.join(",", recientes));
     }
     
     // ════════════════════════════════════════════════════════════════════════════
@@ -1410,16 +1610,23 @@ public class AdminManager {
     // MÉTODOS DE CLAVE DE CIFRADO
     // ════════════════════════════════════════════════════════════════════════════
     
+    private static final String CFG_ENCRYPTION_KEY = "security.encryption.key";
+
     public static boolean tieneClaveConfigrada() {
-        String clave = prefs.get(PREF_ENCRYPTION_KEY, "");
-        return !clave.isEmpty();
+        // Migración desde Preferences (Registro de Windows) al primer arranque
+        String legacy = prefs.get(PREF_ENCRYPTION_KEY, "");
+        if (!legacy.isEmpty() && !configRepo.existe(CFG_ENCRYPTION_KEY)) {
+            configRepo.guardar(CFG_ENCRYPTION_KEY, legacy, "seguridad", "Hash de clave de cifrado Excel (migrado)", true);
+            prefs.remove(PREF_ENCRYPTION_KEY);
+        }
+        return configRepo.existe(CFG_ENCRYPTION_KEY);
     }
     
     /**
      * Verifica una clave de cifrado usando hash PBKDF2 y comparación en tiempo constante.
      */
     public static boolean verificarClaveCifrado(String clave) {
-        String storedHash = prefs.get(PREF_ENCRYPTION_KEY, "");
+        String storedHash = configRepo.obtener(CFG_ENCRYPTION_KEY).orElse("");
         if (storedHash.isEmpty() || clave == null) {
             return false;
         }
@@ -1434,8 +1641,8 @@ public class AdminManager {
         );
         if (coincide) {
             // Migrar a formato seguro
-            prefs.put(PREF_ENCRYPTION_KEY, SecurityManager.hashPassword(clave));
-            System.out.println("[AdminManager] Clave de cifrado migrada a PBKDF2");
+            configRepo.guardar(CFG_ENCRYPTION_KEY, SecurityManager.hashPassword(clave), "seguridad", "Hash de clave de cifrado Excel", true);
+            AppLogger.getLogger(AdminManager.class).info("Clave de cifrado migrada a formato seguro");
         }
         return coincide;
     }
@@ -1449,9 +1656,9 @@ public class AdminManager {
             registrarLog("Seguridad", "Intento no autorizado de cambiar clave de cifrado");
             return;
         }
-        // Almacenar hasheada con PBKDF2 — nunca en texto plano
+        // Almacenar hasheada con PBKDF2 en SQLite portable — nunca en texto plano
         String hash = SecurityManager.hashPassword(nuevaClave);
-        prefs.put(PREF_ENCRYPTION_KEY, hash);
+        configRepo.guardar(CFG_ENCRYPTION_KEY, hash, "seguridad", "Hash de clave de cifrado Excel", true);
         registrarLog("Seguridad", "Clave de cifrado actualizada");
     }
     
@@ -1465,9 +1672,7 @@ public class AdminManager {
             return "";
         }
         SecurityManager.registrarActividad();
-        // Devolver indicador de que existe, no la clave en sí
-        String stored = prefs.get(PREF_ENCRYPTION_KEY, "");
-        return stored.isEmpty() ? "" : "[CONFIGURADA]";
+        return configRepo.existe(CFG_ENCRYPTION_KEY) ? "[CONFIGURADA]" : "";
     }
     
     // ════════════════════════════════════════════════════════════════════════════
@@ -1706,10 +1911,10 @@ public class AdminManager {
                             }
                         }
                     }
-                    System.out.println("[AdminManager]   ✓ Claves de seguridad copiadas");
+                    AppLogger.getLogger(AdminManager.class).debug("Claves de seguridad respaldadas");
                 }
             } catch (Exception e) {
-                System.out.println("[AdminManager]   ⚠ Error copiando seguridad (continuando): " + e.getMessage());
+                AppLogger.getLogger(AdminManager.class).warn("Error copiando seguridad (continuando): " + e.getMessage());
             }
             
             // 5. Copiar configuración

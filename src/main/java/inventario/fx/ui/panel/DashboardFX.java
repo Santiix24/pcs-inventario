@@ -10,6 +10,7 @@ import inventario.fx.ui.component.NotificacionesFX;
 import inventario.fx.util.SVGUtil;
 import inventario.fx.util.ComponentesFX;
 import inventario.fx.util.AnimacionesFX;
+import inventario.fx.util.ScreenUtils;
 import javafx.animation.*;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -165,18 +166,13 @@ public class DashboardFX extends InventarioFXBase {
 
         dashboardStage = new Stage();
         dashboardStage.setTitle("SELCOMP — Dashboard");
-        dashboardStage.setWidth(1600);
-        dashboardStage.setHeight(900);
+        dashboardStage.setWidth(ScreenUtils.w(1600, 1200));
+        dashboardStage.setHeight(ScreenUtils.h(900, 700));
         dashboardStage.setMinWidth(1200);
         dashboardStage.setMinHeight(700);
 
-        // Cargar icono
-        try {
-            InputStream iconStream = DashboardFX.class.getResourceAsStream(RUTA_IMAGENES + ICONO);
-            if (iconStream != null) {
-                dashboardStage.getIcons().add(new Image(iconStream));
-            }
-        } catch (Exception ignored) {}
+        // Ícono SELCOMP centralizado
+        inventario.fx.core.InventarioFX.aplicarIconoApp(dashboardStage);
 
         rootLayout = new BorderPane();
         rootLayout.setStyle("-fx-background-color: " + COLOR_BG_DARK() + ";");
@@ -490,6 +486,34 @@ public class DashboardFX extends InventarioFXBase {
                     contenidoApps = crearContenidoTabla(hojaApps, rutaExcel);
                 }
                 wb.close();
+            } else {
+                logger.error("[Dashboard] No se pudo descifrar el archivo: " + rutaExcel);
+                VBox errorBox = crearPlaceholderTablaVacia(
+                    IconosSVG.error(COLOR_TEXT_SECONDARY(), 48),
+                    "Error al leer el inventario",
+                    "El archivo existe pero no se puede descifrar.\n" +
+                    "Esto ocurre si el EXE fue movido sin mover la carpeta .datos/,\n" +
+                    "o si los datos fueron eliminados.\n" +
+                    "Genera un nuevo inventario para restaurar este proyecto."
+                );
+                // Botón de recuperación directo en la pantalla de error
+                javafx.scene.control.Button btnRegenerar =
+                    new javafx.scene.control.Button("\u21BB  Generar nuevo inventario");
+                btnRegenerar.setStyle(
+                    "-fx-background-color: #EF4444;" +
+                    "-fx-text-fill: white;" +
+                    "-fx-font-size: 13px;" +
+                    "-fx-font-family: 'Segoe UI';" +
+                    "-fx-background-radius: 8;" +
+                    "-fx-padding: 10 24 10 24;" +
+                    "-fx-cursor: hand;"
+                );
+                btnRegenerar.setOnAction(ev -> {
+                    dashboardStage.close();
+                    inventario.fx.core.InventarioFX.mostrarMenu(parentStage);
+                });
+                errorBox.getChildren().add(btnRegenerar);
+                contenidoSistema = errorBox;
             }
         } catch (Exception e) {
             logger.error("Error: " + e.getMessage(), e);
@@ -3628,8 +3652,14 @@ public class DashboardFX extends InventarioFXBase {
 
         task.setOnSucceeded(e -> {
             contentArea.getChildren().remove(overlay);
-            NotificacionesFX.success(contentArea, "Exportación completada",
-                "Archivo exportado exitosamente: " + destino.getName());
+            File carpetaDestino = destino.getParentFile();
+            NotificacionesFX.successConAccion(contentArea, "Exportación completada",
+                "Archivo exportado: " + destino.getName(),
+                "📂 Abrir carpeta",
+                () -> {
+                    try { java.awt.Desktop.getDesktop().open(carpetaDestino); }
+                    catch (Exception ex) { System.err.println("Error abriendo carpeta: " + ex.getMessage()); }
+                });
         });
 
         task.setOnFailed(e -> {

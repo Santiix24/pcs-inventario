@@ -1,4 +1,4 @@
-package inventario.fx.ui.panel;
+﻿package inventario.fx.ui.panel;
 import inventario.fx.config.PortablePaths;
 import inventario.fx.model.TemaManager;
 import inventario.fx.model.AdminManager;
@@ -530,6 +530,8 @@ public class MantenimientoFX {
         Label lbl = new Label(titulo);
         lbl.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         lbl.setTextFill(Color.web(TemaManager.getText()));
+        lbl.setWrapText(true);
+        HBox.setHgrow(lbl, Priority.ALWAYS);
         top.getChildren().addAll(iconW, lbl);
 
         Label d = new Label(desc);
@@ -846,7 +848,7 @@ public class MantenimientoFX {
                         throw new IOException("Verificación fallida: DB original=" + dbSize + " copia=" + copiedSize);
                     }
                     archivosCopiados++;
-                    System.out.println("[Backup] DB copiada: " + formatSize(dbSize));
+                    AppLogger.getLogger(MantenimientoFX.class).debug("DB respaldada: " + formatSize(dbSize));
                 } else {
                     System.err.println("[Backup] ADVERTENCIA: No se encontró inventario.db en " + dbDir);
                 }
@@ -888,7 +890,7 @@ public class MantenimientoFX {
                             Files.copy(src, targetSec.resolve(src.getFileName()), StandardCopyOption.REPLACE_EXISTING);
                             archivosCopiados++;
                         }
-                        System.out.println("[Backup] " + secFiles.size() + " claves de seguridad copiadas");
+                        AppLogger.getLogger(MantenimientoFX.class).debug(secFiles.size() + " archivos de seguridad respaldados");
                     }
                 }
 
@@ -955,7 +957,7 @@ public class MantenimientoFX {
                 if (Files.exists(masterKey)) {
                     Files.copy(masterKey, backupDir.resolve("master.key"), StandardCopyOption.REPLACE_EXISTING);
                     archivosCopiados++;
-                    System.out.println("[Backup] Master key copiada");
+                    AppLogger.getLogger(MantenimientoFX.class).debug("Archivo criptogr\u00e1fico respaldado");
                 }
                 Path configProps = PortablePaths.getConfigProperties();
                 if (Files.exists(configProps)) {
@@ -1090,11 +1092,25 @@ public class MantenimientoFX {
                     try (Stream<Path> files = Files.list(secBackup)) {
                         List<Path> secFiles = files.toList();
                         for (Path src : secFiles) {
-                            Files.copy(src, targetSec.resolve(src.getFileName()), StandardCopyOption.REPLACE_EXISTING);
-                            securityCount++;
+                            try {
+                                Path dest = targetSec.resolve(src.getFileName());
+                                // Si el archivo está bloqueado, copiamos a temporal y luego reemplazamos
+                                Path tmp = dest.resolveSibling(src.getFileName() + ".tmp_restore");
+                                Files.copy(src, tmp, StandardCopyOption.REPLACE_EXISTING);
+                                try {
+                                    Files.move(tmp, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                                } catch (Exception atomicEx) {
+                                    // ATOMIC_MOVE puede fallar en distintos FS, intentar sin ATOMIC
+                                    try { Files.move(tmp, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+                                    catch (Exception mvEx) { Files.deleteIfExists(tmp); AppLogger.getLogger(MantenimientoFX.class).warn("[Restore] No se pudo reemplazar clave (en uso): " + src.getFileName()); }
+                                }
+                                securityCount++;
+                            } catch (Exception secEx) {
+                                AppLogger.getLogger(MantenimientoFX.class).warn("[Restore] Clave de seguridad omitida (en uso): " + src.getFileName() + " — " + secEx.getMessage());
+                            }
                         }
                     }
-                    System.out.println("[Restore] " + securityCount + " claves restauradas");
+                    AppLogger.getLogger(MantenimientoFX.class).debug(securityCount + " archivos de seguridad restaurados");
                 }
 
                 // ── 4. RESTAURAR BASE DE DATOS ──
@@ -1210,7 +1226,7 @@ public class MantenimientoFX {
                 Path masterKeyBackup = backupPath.resolve("master.key");
                 if (Files.exists(masterKeyBackup)) {
                     Files.copy(masterKeyBackup, PortablePaths.getMasterKeyFile(), StandardCopyOption.REPLACE_EXISTING);
-                    System.out.println("[Restore] Master key restaurada");
+                    AppLogger.getLogger(MantenimientoFX.class).debug("Archivo criptogr\u00e1fico restaurado");
                 }
                 Path configPropsBackup = backupPath.resolve("config.properties");
                 if (Files.exists(configPropsBackup)) {
@@ -1230,10 +1246,7 @@ public class MantenimientoFX {
                 final int totalFirmas = firmasCount;
 
                 System.out.println("[Restore] === RESTAURACIÓN COMPLETADA ===");
-                System.out.println("[Restore] DB: " + formatSize(restoredSize));
-                System.out.println("[Restore] Excel: " + totalExcel);
-                System.out.println("[Restore] Claves: " + totalSecurity);
-                System.out.println("[Restore] Firmas: " + totalFirmas);
+                AppLogger.getLogger(MantenimientoFX.class).info("Restauración completada — DB: " + formatSize(restoredSize) + " | Excel: " + totalExcel + " | Seguridad: " + totalSecurity + " | Firmas: " + totalFirmas);
 
                 Platform.runLater(() -> {
                     progress.close();

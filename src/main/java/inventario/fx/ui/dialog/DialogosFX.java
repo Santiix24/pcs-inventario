@@ -2261,6 +2261,8 @@ public class DialogosFX extends InventarioFXBase {
         Label lblValor = new Label(valor);
         lblValor.setFont(Font.font("Segoe UI", 12));
         lblValor.setTextFill(Color.web(TemaManager.getText()));
+        lblValor.setWrapText(true);
+        HBox.setHgrow(lblValor, Priority.ALWAYS);
         
         item.getChildren().addAll(iconWrapper, lblLabel, lblValor);
         container.getChildren().add(item);

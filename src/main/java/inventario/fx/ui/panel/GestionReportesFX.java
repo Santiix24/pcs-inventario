@@ -7,6 +7,7 @@ import inventario.fx.ui.component.NotificacionesFX;
 import inventario.fx.excel.TemplateBuilder;
 import inventario.fx.excel.ExcelToPdfConverter;
 import inventario.fx.util.AppLogger;
+import inventario.fx.util.ScreenUtils;
 
 import inventario.fx.util.ComponentesFX;
 import javafx.animation.*;
@@ -30,6 +31,7 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.stage.DirectoryChooser;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -194,8 +196,8 @@ public class GestionReportesFX {
         ventana.initModality(Modality.APPLICATION_MODAL);
         ventana.initOwner(parent);
         ventana.setTitle("Centro de Reportes");
-        ventana.setWidth(1400);
-        ventana.setHeight(850);
+        ventana.setWidth(ScreenUtils.w(1400, 1100));
+        ventana.setHeight(ScreenUtils.h(850, 700));
         ventana.setMinWidth(1100);
         ventana.setMinHeight(700);
 
@@ -3230,9 +3232,16 @@ public class GestionReportesFX {
             return;
         }
         
-        // Guardar automáticamente en carpeta del proyecto
+        // Guardar en carpeta elegida por el usuario
         String proyectoMasivo = seleccionMultiple.get(0).getProyecto();
-        File carpeta = inventario.fx.config.PortablePaths.getExportReportesDir(proyectoMasivo).toFile();
+        File carpetaSugerida = inventario.fx.config.PortablePaths.getExportReportesDir(proyectoMasivo).toFile();
+        
+        DirectoryChooser dirChooser = new DirectoryChooser();
+        dirChooser.setTitle("Seleccionar carpeta para guardar " + seleccionMultiple.size() + " reportes");
+        dirChooser.setInitialDirectory(carpetaSugerida);
+        
+        File carpeta = dirChooser.showDialog(obtenerVentanaActiva());
+        if (carpeta == null) return; // Usuario canceló
         
         {
             // Crear lista inmutable de reportes a exportar
@@ -3682,8 +3691,13 @@ public class GestionReportesFX {
                 NotificacionesFX.warning(contenedor, "Exportación Cancelada",
                     exitosos + " reporte" + (exitosos != 1 ? "s exportados" : " exportado") + " antes de cancelar.");
             } else if (fallidos == 0) {
-                NotificacionesFX.success(contenedor, "¡Exportación Completada!",
-                    exitosos + " reporte" + (exitosos != 1 ? "s exportados" : " exportado") + " correctamente.");
+                NotificacionesFX.successConAccion(contenedor, "¡Exportación Completada!",
+                    exitosos + " reporte" + (exitosos != 1 ? "s exportados" : " exportado") + " correctamente.",
+                    "📂 Abrir carpeta",
+                    () -> {
+                        try { java.awt.Desktop.getDesktop().open(carpeta); } 
+                        catch (Exception ex) { System.err.println("Error abriendo carpeta: " + ex.getMessage()); }
+                    });
             } else {
                 NotificacionesFX.warning(contenedor, "Exportación con Errores",
                     exitosos + " exportados, " + fallidos + " fallidos.");
@@ -3699,17 +3713,25 @@ public class GestionReportesFX {
         String ext = "PDF".equals(formato) ? ".pdf" : "EXCEL".equals(formato) ? ".xlsx" : ".csv";
         String nombreArchivo = "Reporte_" + item.getTicket() + "_" + item.getFechaCreacion().replace("/", "-") + ext;
         
-        // Guardar automáticamente en carpeta del proyecto
+        // Directorio inicial sugerido (carpeta del proyecto)
         java.nio.file.Path dirProyecto = inventario.fx.config.PortablePaths.getExportReportesDir(item.getProyecto());
-        File archivo = new File(dirProyecto.toFile(), nombreArchivo);
         
-        // Si ya existe, agregar sufijo numérico
-        int contador = 1;
-        while (archivo.exists()) {
-            String nombre = "Reporte_" + item.getTicket() + "_" + item.getFechaCreacion().replace("/", "-") + "_" + contador + ext;
-            archivo = new File(dirProyecto.toFile(), nombre);
-            contador++;
+        // Mostrar diálogo "Guardar como" para que el usuario elija dónde guardar
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Guardar reporte " + formato);
+        fileChooser.setInitialFileName(nombreArchivo);
+        fileChooser.setInitialDirectory(dirProyecto.toFile());
+        
+        if ("PDF".equals(formato)) {
+            fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("Archivos PDF", "*.pdf"));
+        } else {
+            fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("Archivos Excel", "*.xlsx"));
         }
+        
+        File archivo = fileChooser.showSaveDialog(obtenerVentanaActiva());
+        if (archivo == null) return; // Usuario canceló
         
         {
             // Mostrar indicador de carga
@@ -3730,7 +3752,14 @@ public class GestionReportesFX {
                 ventanaCarga.close();
                 StackPane contenedor = contenedorPrincipal != null ? contenedorPrincipal : contenedorIntegrado;
                 if (contenedor != null) {
-                    NotificacionesFX.success(contenedor, "¡Reporte Guardado!", "Exportado en: " + dirProyecto.getFileName() + "/" + archivoFinal.getName());
+                    File carpetaDestino = archivoFinal.getParentFile();
+                    NotificacionesFX.successConAccion(contenedor, "¡Reporte Guardado!",
+                        "Guardado en: " + archivoFinal.getName(),
+                        "📂 Abrir carpeta",
+                        () -> {
+                            try { java.awt.Desktop.getDesktop().open(carpetaDestino); } 
+                            catch (Exception ex) { System.err.println("Error abriendo carpeta: " + ex.getMessage()); }
+                        });
                 }
             });
             

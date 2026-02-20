@@ -274,6 +274,7 @@ public class SecurityManager {
 
             return registro;
         });
+        persistirEstadoBF(); // Guardar en disco para sobrevivir reinicios
     }
 
     /**
@@ -283,6 +284,7 @@ public class SecurityManager {
      */
     public static void reiniciarIntentos(String fuente) {
         intentosFallidos.remove(fuente);
+        persistirEstadoBF(); // Limpiar estado en disco tras login exitoso
     }
 
     /**
@@ -337,8 +339,7 @@ public class SecurityManager {
         long tiempoInactivo = System.currentTimeMillis() - ultimaActividad;
         if (tiempoInactivo > SESSION_TIMEOUT_MS) {
             cerrarSesion();
-            System.out.println("[SecurityManager] Sesión expirada por inactividad (" +
-                (tiempoInactivo / 60000) + " min)");
+            // No logear detalles de sesión a consola
             return true;
         }
         return false;
@@ -544,6 +545,61 @@ public class SecurityManager {
     }
 
     // ════════════════════════════════════════════════════════════════════════════
+    // PERSISTENCIA ANTI-BRUTE-FORCE (sobrevive reinicios del exe)
+    // ════════════════════════════════════════════════════════════════════════════
+
+    private static volatile java.nio.file.Path bruteForceFile = null;
+
+    /**
+     * Inicializa la persistencia de contadores brute-force desde archivo.
+     * Llamar una vez al arrancar la app.
+     */
+    public static synchronized void inicializarPersistencia(java.nio.file.Path bfPath) {
+        bruteForceFile = bfPath;
+        // Cargar estado anterior
+        if (!java.nio.file.Files.exists(bfPath)) return;
+        try {
+            java.util.Properties p = new java.util.Properties();
+            try (java.io.InputStream in = java.nio.file.Files.newInputStream(bfPath)) {
+                p.load(in);
+            }
+            p.stringPropertyNames().forEach(fuente -> {
+                String[] parts = p.getProperty(fuente, "").split(",");
+                if (parts.length == 3) {
+                    try {
+                        IntentosFallidos reg = new IntentosFallidos();
+                        reg.intentos.set(Integer.parseInt(parts[0].trim()));
+                        reg.bloqueosConsecutivos = Integer.parseInt(parts[1].trim());
+                        reg.ultimoIntento = Long.parseLong(parts[2].trim());
+                        // Solo cargar si el bloqueo aún es vigente (no expirado hace >24h)
+                        long transcurrido = System.currentTimeMillis() - reg.ultimoIntento;
+                        if (reg.intentos.get() >= MAX_INTENTOS_FALLIDOS && transcurrido < 24 * 3600_000L) {
+                            intentosFallidos.put(fuente, reg);
+                        }
+                    } catch (NumberFormatException ignored) {}
+                }
+            });
+        } catch (Exception e) {
+            System.err.println("[SecurityManager] Error cargando estado brute-force: " + e.getMessage());
+        }
+    }
+
+    private static void persistirEstadoBF() {
+        if (bruteForceFile == null) return;
+        try {
+            java.util.Properties p = new java.util.Properties();
+            intentosFallidos.forEach((fuente, reg) ->
+                p.setProperty(fuente, reg.intentos.get() + "," + reg.bloqueosConsecutivos + "," + reg.ultimoIntento));
+            java.nio.file.Files.createDirectories(bruteForceFile.getParent());
+            try (java.io.OutputStream out = java.nio.file.Files.newOutputStream(bruteForceFile)) {
+                p.store(out, null);
+            }
+        } catch (Exception e) {
+            System.err.println("[SecurityManager] Error guardando estado brute-force: " + e.getMessage());
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
     // LIMPIEZA DE DATOS SENSIBLES
     // ════════════════════════════════════════════════════════════════════════════
 
@@ -594,7 +650,7 @@ public class SecurityManager {
             // Hashear la contraseña existente (texto plano)
             String hashedPassword = hashPassword(stored);
             prefs.put(prefKey, hashedPassword);
-            System.out.println("[SecurityManager] Contraseña migrada a formato seguro PBKDF2 para: " + prefKey);
+            // Migración completada silenciosamente
             return true;
 
         } catch (Exception e) {

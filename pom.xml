@@ -277,10 +277,10 @@
                             <classPath>
                                 <mainClass>inventario.fx.core.Launcher</mainClass>
                             </classPath>
+                            <chdir>.</chdir>
                             <jre>
-                                <path>./jre</path>
+                                <path>./jre;%JAVA_HOME%</path>
                                 <minVersion>17</minVersion>
-                                <requires64Bit>true</requires64Bit>
                             </jre>
                             <versionInfo>
                                 <fileVersion>1.0.0.0</fileVersion>
@@ -310,7 +310,7 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- //JLINK: CREAR JRE PORTABLE JUNTO AL EXE\\ -->
+            <!-- //JLINK: CREAR JRE PORTABLE (antes de shade para empotrar en JAR)\\ -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
@@ -318,7 +318,7 @@
                 <executions>
                     <execution>
                         <id>crear-jre-portable</id>
-                        <phase>package</phase>
+                        <phase>prepare-package</phase>
                         <goals><goal>exec</goal></goals>
                         <configuration>
                             <executable>${java.home}/bin/jlink</executable>
@@ -332,6 +332,66 @@
                                 <argument>--output</argument>
                                 <argument>${project.build.directory}/jre</argument>
                             </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- //EMPAQUETAR PORTABLE: .exe + jre oculto\\ -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <!-- Paso 1: Comprimir JRE en jre.zip dentro de classes/ para que shade lo incluya -->
+                    <execution>
+                        <id>zip-jre-into-jar</id>
+                        <phase>prepare-package</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target>
+                                <echo message="[JRE] Comprimiendo JRE portable en jre.zip..."/>
+                                <zip destfile="${project.build.directory}/classes/jre.zip"
+                                     basedir="${project.build.directory}/jre"
+                                     level="9"/>
+                                <echo message="[JRE] jre.zip creado - sera empotrado dentro del JAR/EXE"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <!-- Paso 2: Crear carpeta Inventario-Portable lista para distribuir -->
+                    <execution>
+                        <id>crear-portable</id>
+                        <phase>package</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target>
+                                <!-- Eliminar carpeta portable anterior por completo -->
+                                <delete dir="${project.build.directory}/Inventario-Portable" quiet="true"/>
+                                <mkdir dir="${project.build.directory}/Inventario-Portable"/>
+
+                                <!-- Solo copiar el exe, sin ninguna carpeta .datos ni datos -->
+                                <copy file="${project.build.directory}/Inventario.exe"
+                                      todir="${project.build.directory}/Inventario-Portable"/>
+
+                                <!-- Copiar JRE portable (necesario para PCs sin Java instalado) -->
+                                <copy todir="${project.build.directory}/Inventario-Portable/jre">
+                                    <fileset dir="${project.build.directory}/jre"/>
+                                </copy>
+
+                                <!-- Seguridad: eliminar .datos si de alguna forma existiera -->
+                                <delete dir="${project.build.directory}/Inventario-Portable/.datos" quiet="true"/>
+
+                                <!-- Generar ZIP limpio listo para compartir (solo el exe) -->
+                                <delete file="${project.build.directory}/Inventario-Portable.zip" quiet="true"/>
+                                <zip destfile="${project.build.directory}/Inventario-Portable.zip"
+                                     basedir="${project.build.directory}/Inventario-Portable"
+                                     level="6"/>
+
+                                <echo message=""/>
+                                <echo message="PORTABLE LISTO (100% limpio, sin datos):"/>
+                                <echo message="  target/Inventario-Portable/Inventario.exe"/>
+                                <echo message="  target/Inventario-Portable.zip  (para compartir)"/>
+                                <echo message="  Sin BD, sin contrasenas, sin Excel, inicio fresco"/>
+                            </target>
                         </configuration>
                     </execution>
                 </executions>

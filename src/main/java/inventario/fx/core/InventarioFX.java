@@ -12,6 +12,7 @@ import inventario.fx.ui.panel.DashboardFX;
 import inventario.fx.util.AppLogger;
 import inventario.fx.util.SVGUtil;
 import inventario.fx.util.ComponentesFX;
+import inventario.fx.util.ScreenUtils;
 import javafx.animation.*;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -86,12 +87,35 @@ public class InventarioFX extends InventarioFXBase {
     private static String pendingAction = null;
 
     // ════════════════════════════════════════════════════════════════════════════
+    // UTILIDAD: ÍCONO SELCOMP EN CUALQUIER STAGE
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Aplica el ícono oficial de SELCOMP al stage dado.
+     * Debe llamarse ANTES de {@code stage.show()} para que el taskbar lo muestre.
+     */
+    public static void aplicarIconoApp(Stage stage) {
+        if (stage == null) return;
+        try {
+            InputStream iconStream = InventarioFX.class.getResourceAsStream(RUTA_IMAGENES + ICONO);
+            if (iconStream != null) {
+                Image icon = new Image(iconStream);
+                stage.getIcons().clear();
+                stage.getIcons().add(icon);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
     // SPLASH SCREEN MINIMALISTA PREMIUM
     // ════════════════════════════════════════════════════════════════════════════
 
     public static void mostrarSplash(Stage splashStage, Stage mainStage) {
         InventarioFX.mainStage = mainStage;
         splashStage.initStyle(StageStyle.TRANSPARENT);
+        // Ícono SELCOMP en el splash (de lo contrario Windows muestra el café de Java)
+        aplicarIconoApp(splashStage);
+        aplicarIconoApp(mainStage);
 
         StackPane root = new StackPane();
         root.setAlignment(Pos.CENTER);
@@ -351,7 +375,9 @@ public class InventarioFX extends InventarioFXBase {
             }
         });
 
-        Scene scene = new Scene(rootStack, 800, 600);
+        Scene scene = new Scene(rootStack,
+                ScreenUtils.w(800),
+                ScreenUtils.h(600));
         // Aplicar tema usando TemaManager
         TemaManager.aplicarTema(scene);
         TemaManager.registrarEscena(scene);
@@ -375,14 +401,8 @@ public class InventarioFX extends InventarioFXBase {
             }
         });
 
-        // Cargar icono
-        try {
-            InputStream iconStream = InventarioFX.class.getResourceAsStream(RUTA_IMAGENES + ICONO);
-            if (iconStream != null) {
-                stage.getIcons().clear();
-                stage.getIcons().add(new Image(iconStream));
-            }
-        } catch (Exception ignored) {}
+        // Cargar icono usando el helper centralizado
+        aplicarIconoApp(stage);
 
         stage.setScene(scene);
         stage.setResizable(true);
@@ -518,7 +538,8 @@ public class InventarioFX extends InventarioFXBase {
         heroSubtitle.setFont(Font.font("Segoe UI", 13));
         heroSubtitle.setTextFill(COLOR_TEXT_MUTED());
         heroSubtitle.setWrapText(true);
-        heroSubtitle.setMaxWidth(340);
+        heroSubtitle.setPrefWidth(300);           // fuerza wrapping real (single-line natural ≈ 420px)
+        heroSubtitle.setMaxWidth(Double.MAX_VALUE); // deja que el layout administre el ancho
         heroSubtitle.setAlignment(Pos.CENTER);
         heroSubtitle.setStyle("-fx-text-alignment: center;");
         
@@ -564,93 +585,38 @@ public class InventarioFX extends InventarioFXBase {
 
         cardsRow.getChildren().addAll(card1, card2, card3);
 
-        // Indicador de acción — cambia según si hay proyectos
-        javafx.scene.Node instructionNode;
-        if (AdminManager.getProyectosActivos().isEmpty()) {
-            // Empty state: sin proyectos → CTA para ir a Administrar
-            VBox emptyState = new VBox(10);
-            emptyState.setAlignment(Pos.CENTER);
-            emptyState.setPadding(new Insets(20, 30, 20, 30));
-            emptyState.setMaxWidth(380);
-            emptyState.setStyle(
-                "-fx-background-color: " + TemaManager.getSurface() + ";" +
-                "-fx-background-radius: 14;" +
-                "-fx-border-color: " + TemaManager.getBorder() + ";" +
-                "-fx-border-radius: 14;" +
-                "-fx-border-width: 1;"
-            );
+        // Indicador de acción — siempre visible en el home
+        boolean sinProyectos = AdminManager.getProyectosActivos().isEmpty();
+        HBox instructionBox = new HBox(10);
+        instructionBox.setAlignment(Pos.CENTER);
+        instructionBox.setPadding(new Insets(24, 20, 0, 20));
+        instructionBox.setStyle(
+            "-fx-background-color: " + TemaManager.getSurface() + ";" +
+            "-fx-background-radius: 25;" +
+            "-fx-padding: 10 20 10 20;"
+        );
+        instructionBox.setMaxWidth(340);
 
-            Label emptyIcon = new Label("📋");
-            emptyIcon.setFont(Font.font("Segoe UI", 28));
+        Label arrow = new Label("←");
+        arrow.setFont(Font.font("Segoe UI", FontWeight.BOLD, 16));
+        arrow.setTextFill(COLOR_PRIMARY);
 
-            Label emptyTitle = new Label("No tienes proyectos aún");
-            emptyTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
-            emptyTitle.setTextFill(COLOR_TEXT());
+        TranslateTransition arrowAnim = new TranslateTransition(Duration.millis(800), arrow);
+        arrowAnim.setFromX(0);
+        arrowAnim.setToX(-5);
+        arrowAnim.setCycleCount(Animation.INDEFINITE);
+        arrowAnim.setAutoReverse(true);
+        arrowAnim.setInterpolator(Interpolator.EASE_BOTH);
+        arrowAnim.play();
 
-            Label emptyDesc = new Label("Crea tu primer proyecto para comenzar a registrar inventarios");
-            emptyDesc.setFont(Font.font("Segoe UI", 12));
-            emptyDesc.setTextFill(COLOR_TEXT_MUTED());
-            emptyDesc.setWrapText(true);
-            emptyDesc.setAlignment(Pos.CENTER);
-            emptyDesc.setStyle("-fx-text-alignment: center;");
+        Label instruction = new Label(sinProyectos
+            ? "Ve a Administrar para crear tu primer proyecto"
+            : "Selecciona una acción del menú lateral");
+        instruction.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 12));
+        instruction.setTextFill(COLOR_TEXT_MUTED());
 
-            Button btnIrAdmin = new Button("Ir a Administrar →");
-            btnIrAdmin.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
-            btnIrAdmin.setTextFill(Color.WHITE);
-            btnIrAdmin.setPrefHeight(34);
-            btnIrAdmin.setStyle(
-                "-fx-background-color: " + TemaManager.COLOR_PRIMARY + ";" +
-                "-fx-background-radius: 8;" +
-                "-fx-cursor: hand;" +
-                "-fx-padding: 6 20;"
-            );
-            btnIrAdmin.setOnMouseEntered(ev -> {
-                btnIrAdmin.setStyle(
-                    "-fx-background-color: #FF4D5A; -fx-background-radius: 8; -fx-cursor: hand; -fx-padding: 6 20;"
-                );
-                AnimacionesFX.hoverIn(btnIrAdmin, 1.05, 150);
-            });
-            btnIrAdmin.setOnMouseExited(ev -> {
-                btnIrAdmin.setStyle(
-                    "-fx-background-color: " + TemaManager.COLOR_PRIMARY + "; -fx-background-radius: 8; -fx-cursor: hand; -fx-padding: 6 20;"
-                );
-                AnimacionesFX.hoverOut(btnIrAdmin, 150);
-            });
-            btnIrAdmin.setOnAction(ev -> mostrarPanelAdministracion());
-
-            emptyState.getChildren().addAll(emptyIcon, emptyTitle, emptyDesc, btnIrAdmin);
-            instructionNode = emptyState;
-        } else {
-            // Con proyectos → instrucción normal
-            HBox instructionBox = new HBox(10);
-            instructionBox.setAlignment(Pos.CENTER);
-            instructionBox.setPadding(new Insets(24, 20, 0, 20));
-            instructionBox.setStyle(
-                "-fx-background-color: " + TemaManager.getSurface() + ";" +
-                "-fx-background-radius: 25;" +
-                "-fx-padding: 10 20 10 20;"
-            );
-            instructionBox.setMaxWidth(320);
-
-            Label arrow = new Label("←");
-            arrow.setFont(Font.font("Segoe UI", FontWeight.BOLD, 16));
-            arrow.setTextFill(COLOR_PRIMARY);
-
-            TranslateTransition arrowAnim = new TranslateTransition(Duration.millis(800), arrow);
-            arrowAnim.setFromX(0);
-            arrowAnim.setToX(-5);
-            arrowAnim.setCycleCount(Animation.INDEFINITE);
-            arrowAnim.setAutoReverse(true);
-            arrowAnim.setInterpolator(Interpolator.EASE_BOTH);
-            arrowAnim.play();
-
-            Label instruction = new Label("Selecciona una acción del menú lateral");
-            instruction.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 12));
-            instruction.setTextFill(COLOR_TEXT_MUTED());
-
-            instructionBox.getChildren().addAll(arrow, instruction);
-            instructionNode = instructionBox;
-        }
+        instructionBox.getChildren().addAll(arrow, instruction);
+        javafx.scene.Node instructionNode = instructionBox;
 
         heroSection.getChildren().addAll(iconContainer, textContainer, cardsRow, instructionNode);
         
@@ -867,7 +833,7 @@ public class InventarioFX extends InventarioFXBase {
         // Actualización en tiempo real si hay un proveedor de valor dinámico
         if (valorDinamico != null) {
             Timeline updateTimeline = new Timeline(
-                new KeyFrame(Duration.seconds(2), e -> {
+                new KeyFrame(Duration.seconds(5), e -> { // 5s para reducir carga de CPU vs 2s anterior
                     String nuevoValor = valorDinamico.get();
                     if (!valorLabel.getText().equals(nuevoValor)) {
                         // Animación de cambio de valor
@@ -1023,13 +989,25 @@ public class InventarioFX extends InventarioFXBase {
         container.getChildren().addAll(ring3, ring2, bgGlow, bgMain, iconoLaptop, particle1, particle2, particle3);
         container.getChildren().addAll(toolIcons);
         
-        // ★ Cachear nodos animados para rendimiento en equipos viejos (usa GPU en vez de CPU)
+        // ★ Cachear nodos animados: GPU rasteriza el nodo una vez y lo transforma en hardware
         container.setCache(true);
         container.setCacheHint(javafx.scene.CacheHint.SPEED);
+        // Anillos usan ROTATE (óptimo para rotaciones — evita re-rasterización por ángulo)
         ring3.setCache(true);
-        ring3.setCacheHint(javafx.scene.CacheHint.SPEED);
+        ring3.setCacheHint(javafx.scene.CacheHint.ROTATE);
         ring2.setCache(true);
-        ring2.setCacheHint(javafx.scene.CacheHint.SPEED);
+        ring2.setCacheHint(javafx.scene.CacheHint.ROTATE);
+        // Fondo y partículas usan SPEED (óptimo para fade/translate)
+        bgGlow.setCache(true);
+        bgGlow.setCacheHint(javafx.scene.CacheHint.SPEED);
+        bgMain.setCache(true);
+        bgMain.setCacheHint(javafx.scene.CacheHint.SPEED);
+        particle1.setCache(true);
+        particle1.setCacheHint(javafx.scene.CacheHint.SPEED);
+        particle2.setCache(true);
+        particle2.setCacheHint(javafx.scene.CacheHint.SPEED);
+        particle3.setCache(true);
+        particle3.setCacheHint(javafx.scene.CacheHint.SPEED);
         
         // ═══════════════════════════════════════════════════════════════════
         // ANIMACIONES CONTINUAS
@@ -1335,7 +1313,114 @@ public class InventarioFX extends InventarioFXBase {
         
         java.util.List<AdminManager.Proyecto> proyectos = AdminManager.getProyectosActivos();
         System.out.println("[InventarioFX] Actualizando panel lateral con " + proyectos.size() + " proyectos");
-        
+
+        if (proyectos.isEmpty()) {
+            // ── Empty state premium con iconos Lucide ──
+            StackPane emptyWrapper = new StackPane();
+            emptyWrapper.setPadding(new Insets(4));
+
+            VBox emptyState = new VBox(0);
+            emptyState.setAlignment(Pos.CENTER);
+            emptyState.setStyle(
+                "-fx-background-color: " + TemaManager.getSurface() + ";" +
+                "-fx-background-radius: 18;" +
+                "-fx-border-color: " + TemaManager.getBorder() + ";" +
+                "-fx-border-radius: 18;" +
+                "-fx-border-width: 1;"
+            );
+
+            // Franja superior acento con gradiente
+            StackPane topAccent = new StackPane();
+            topAccent.setPrefHeight(86);
+            topAccent.setStyle(
+                "-fx-background-color: linear-gradient(to bottom right, #E6394618, #E6394605);" +
+                "-fx-background-radius: 18 18 0 0;"
+            );
+            StackPane iconCircle = new StackPane();
+            Circle iconBg = new Circle(28);
+            iconBg.setFill(Color.web(TemaManager.COLOR_PRIMARY + "22"));
+            iconBg.setStroke(Color.web(TemaManager.COLOR_PRIMARY + "55"));
+            iconBg.setStrokeWidth(1.5);
+            DropShadow iconGlow = new DropShadow();
+            iconGlow.setColor(Color.web(TemaManager.COLOR_PRIMARY + "55"));
+            iconGlow.setRadius(14);
+            iconBg.setEffect(iconGlow);
+            javafx.scene.Node iconoSVG = IconosSVG.carpetaMas(TemaManager.COLOR_PRIMARY, 24);
+            iconCircle.getChildren().addAll(iconBg, iconoSVG);
+            topAccent.getChildren().add(iconCircle);
+
+            // Cuerpo del card
+            VBox bodyBox = new VBox(14);
+            bodyBox.setAlignment(Pos.CENTER);
+            bodyBox.setPadding(new Insets(18, 22, 22, 22));
+
+            Label emptyTitle = new Label("Sin proyectos aún");
+            emptyTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
+            emptyTitle.setTextFill(COLOR_TEXT());
+
+            Label emptyDesc = new Label("Crea un proyecto para empezar a registrar el inventario de equipos.");
+            emptyDesc.setFont(Font.font("Segoe UI", 11.5));
+            emptyDesc.setTextFill(COLOR_TEXT_MUTED());
+            emptyDesc.setWrapText(true);
+            emptyDesc.setMaxWidth(300);
+            emptyDesc.setAlignment(Pos.CENTER);
+            emptyDesc.setStyle("-fx-text-alignment: center;");
+
+            // Pasos rápidos
+            VBox stepsBox = new VBox(8);
+            stepsBox.setMaxWidth(300);
+            stepsBox.setStyle(
+                "-fx-background-color: " + TemaManager.getBgLight() + ";" +
+                "-fx-background-radius: 10;" +
+                "-fx-padding: 12;"
+            );
+            stepsBox.getChildren().addAll(
+                crearPasoEmpty("1", IconosSVG.admin(TemaManager.COLOR_PRIMARY, 14), "Ve a Administrar"),
+                crearPasoEmpty("2", IconosSVG.agregar("#10B981", 14), "Crea un nuevo proyecto"),
+                crearPasoEmpty("3", IconosSVG.estadisticas("#3B82F6", 14), "¡Genera el inventario!")
+            );
+
+            // Botón con ícono
+            HBox btnContent = new HBox(8);
+            btnContent.setAlignment(Pos.CENTER);
+            Label btnIcon = new Label();
+            btnIcon.setGraphic(IconosSVG.admin("#FFFFFF", 14));
+            Label btnLabel = new Label("Ir a Administrar");
+            btnLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+            btnLabel.setTextFill(Color.WHITE);
+            btnContent.getChildren().addAll(btnIcon, btnLabel);
+
+            Button btnIrAdmin = new Button();
+            btnIrAdmin.setGraphic(btnContent);
+            btnIrAdmin.setPrefHeight(36);
+            btnIrAdmin.setPrefWidth(200);
+            btnIrAdmin.setStyle(
+                "-fx-background-color: " + TemaManager.COLOR_PRIMARY + ";" +
+                "-fx-background-radius: 10;" +
+                "-fx-cursor: hand;"
+            );
+            btnIrAdmin.setOnMouseEntered(ev -> {
+                btnIrAdmin.setStyle("-fx-background-color: #FF4D5A; -fx-background-radius: 10; -fx-cursor: hand;");
+                AnimacionesFX.hoverIn(btnIrAdmin, 1.04, 120);
+            });
+            btnIrAdmin.setOnMouseExited(ev -> {
+                btnIrAdmin.setStyle("-fx-background-color: " + TemaManager.COLOR_PRIMARY + "; -fx-background-radius: 10; -fx-cursor: hand;");
+                AnimacionesFX.hoverOut(btnIrAdmin, 120);
+            });
+            btnIrAdmin.setOnAction(ev -> {
+                cerrarPanelLateral();
+                mostrarPanelAdministracion();
+            });
+
+            bodyBox.getChildren().addAll(emptyTitle, emptyDesc, stepsBox, btnIrAdmin);
+            emptyState.getChildren().addAll(topAccent, bodyBox);
+            emptyWrapper.getChildren().add(emptyState);
+            projectsListContainer.getChildren().add(emptyWrapper);
+            AnimacionesFX.slideUpFadeIn(emptyWrapper, 350, 15, 0);
+            System.out.println("[InventarioFX] Panel lateral actualizado con estado vacío");
+            return;
+        }
+
         for (int i = 0; i < proyectos.size(); i++) {
             final AdminManager.Proyecto proyecto = proyectos.get(i);
             final String nombreFormateado = (i + 1) + ". " + proyecto.getNombre();
@@ -1363,6 +1448,35 @@ public class InventarioFX extends InventarioFXBase {
         }
         
         System.out.println("[InventarioFX] Panel lateral actualizado con " + projectsListContainer.getChildren().size() + " items");
+    }
+
+    /** Fila de paso numerado para el empty state del panel lateral. */
+    private static HBox crearPasoEmpty(String num, javafx.scene.Node icono, String texto) {
+        HBox fila = new HBox(10);
+        fila.setAlignment(Pos.CENTER_LEFT);
+
+        // Número
+        StackPane numCircle = new StackPane();
+        Circle bg = new Circle(11);
+        bg.setFill(Color.web(TemaManager.COLOR_PRIMARY + "25"));
+        bg.setStroke(Color.web(TemaManager.COLOR_PRIMARY + "55"));
+        bg.setStrokeWidth(1);
+        Label numLabel = new Label(num);
+        numLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 10));
+        numLabel.setTextFill(Color.web(TemaManager.COLOR_PRIMARY));
+        numCircle.getChildren().addAll(bg, numLabel);
+
+        // Icono
+        StackPane iconPane = new StackPane(icono);
+        iconPane.setPrefSize(20, 20);
+
+        // Texto
+        Label lbl = new Label(texto);
+        lbl.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 11.5));
+        lbl.setTextFill(COLOR_TEXT());
+
+        fila.getChildren().addAll(numCircle, iconPane, lbl);
+        return fila;
     }
 
     private static VBox crearItemProyecto(String nombre, int index) {
@@ -1547,6 +1661,17 @@ public class InventarioFX extends InventarioFXBase {
         }
     }
 
+    /** Muestra un error en errorLabel y redimensiona el diálogo para que se vea completo. */
+    private static void mostrarErrorSetup(Label errorLabel, Stage dialog, String mensaje) {
+        errorLabel.setText(mensaje);
+        errorLabel.setVisible(true);
+        errorLabel.setManaged(true);
+        Platform.runLater(() -> {
+            dialog.sizeToScene();
+            dialog.centerOnScreen();
+        });
+    }
+
     /**
      * Diálogo de configuración inicial de contraseña (primera ejecución).
      * Obliga al administrador a establecer una contraseña segura antes de continuar.
@@ -1558,145 +1683,239 @@ public class InventarioFX extends InventarioFXBase {
 
         StackPane root = new StackPane();
         root.setStyle("-fx-background-color: transparent;");
-        root.setPadding(new Insets(20));
+        root.setPadding(new Insets(24));
 
-        VBox container = new VBox(16);
+        VBox container = new VBox(0);
         container.setAlignment(Pos.CENTER);
-        container.setPadding(new Insets(32));
-        container.setMaxWidth(400);
+        container.setPrefWidth(420);
+        container.setMaxWidth(420);
         container.setStyle(
             "-fx-background-color: " + TemaManager.getBg() + ";" +
-            "-fx-background-radius: 20;" +
+            "-fx-background-radius: 22;" +
             "-fx-border-color: " + TemaManager.getBorder() + ";" +
-            "-fx-border-radius: 20;"
+            "-fx-border-radius: 22;"
         );
 
         DropShadow shadow = new DropShadow();
-        shadow.setRadius(30);
-        shadow.setColor(Color.rgb(0, 0, 0, 0.4));
-        shadow.setOffsetY(10);
+        shadow.setRadius(40);
+        shadow.setColor(Color.rgb(0, 0, 0, 0.45));
+        shadow.setOffsetY(12);
         container.setEffect(shadow);
 
-        // Icono de seguridad
-        StackPane iconCircle = new StackPane();
-        Circle bgCircle = new Circle(35);
-        bgCircle.setFill(Color.web("#10B98120"));
-        iconCircle.getChildren().addAll(bgCircle, IconosSVG.admin("#10B981", 36));
+        // ── Franja superior verde ──
+        StackPane topBand = new StackPane();
+        topBand.setPrefHeight(100);
+        topBand.setStyle(
+            "-fx-background-color: linear-gradient(to bottom right, #10B98118, #10B98108);" +
+            "-fx-background-radius: 22 22 0 0;"
+        );
 
-        Label titulo = new Label("Configuracion Inicial");
+        StackPane iconCircle = new StackPane();
+        Circle iconBg = new Circle(32);
+        iconBg.setFill(Color.web("#10B98130"));
+        iconBg.setStroke(Color.web("#10B98170"));
+        iconBg.setStrokeWidth(1.5);
+        DropShadow iconGlow = new DropShadow();
+        iconGlow.setColor(Color.web("#10B98155"));
+        iconGlow.setRadius(16);
+        iconBg.setEffect(iconGlow);
+        iconCircle.getChildren().addAll(iconBg, IconosSVG.candado("#10B981", 30));
+        topBand.getChildren().add(iconCircle);
+
+        // ── Cuerpo ──
+        VBox body = new VBox(16);
+        body.setAlignment(Pos.CENTER);
+        body.setPadding(new Insets(24, 32, 32, 32));
+
+        Label titulo = new Label("Configuración Inicial");
         titulo.setFont(Font.font("Segoe UI", FontWeight.BOLD, 20));
         titulo.setTextFill(COLOR_TEXT());
 
-        Label subtitulo = new Label("Establece una contrasena segura para el modo administrador.\nMinimo 8 caracteres con mayusculas, minusculas, numeros y simbolos.");
+        // Chip informativo
+        HBox chipBox = new HBox(8);
+        chipBox.setAlignment(Pos.CENTER);
+        chipBox.setStyle(
+            "-fx-background-color: #10B98118;" +
+            "-fx-background-radius: 20;" +
+            "-fx-padding: 6 14;"
+        );
+        Label chipIcon = new Label();
+        chipIcon.setGraphic(IconosSVG.escudo("#10B981", 13));
+        Label chipTxt = new Label("Primera configuración de seguridad");
+        chipTxt.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 11));
+        chipTxt.setTextFill(Color.web("#10B981"));
+        chipBox.getChildren().addAll(chipIcon, chipTxt);
+
+        Label subtitulo = new Label("Establece una contraseña segura para el modo administrador.");
         subtitulo.setFont(Font.font("Segoe UI", 12));
         subtitulo.setTextFill(COLOR_TEXT_MUTED());
         subtitulo.setWrapText(true);
+        subtitulo.setMaxWidth(340);
+        subtitulo.setAlignment(Pos.CENTER);
         subtitulo.setStyle("-fx-text-alignment: center;");
 
-        // Campo contraseña nueva
-        PasswordField passNueva = new PasswordField();
-        passNueva.setPromptText("Nueva contrasena");
-        passNueva.setMaxWidth(320);
-        passNueva.setPrefHeight(42);
-        passNueva.setStyle(
+        // Requisitos de contraseña
+        VBox reqBox = new VBox(6);
+        reqBox.setStyle(
+            "-fx-background-color: " + TemaManager.getSurface() + ";" +
+            "-fx-background-radius: 10;" +
+            "-fx-border-color: " + TemaManager.getBorder() + ";" +
+            "-fx-border-radius: 10;" +
+            "-fx-border-width: 1;" +
+            "-fx-padding: 12 16;"
+        );
+        Label reqTitle = new Label("Requisitos de la contraseña:");
+        reqTitle.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 11));
+        reqTitle.setTextFill(COLOR_TEXT_MUTED());
+        reqBox.getChildren().add(reqTitle);
+        String[] reqs = {"Mínimo 8 caracteres", "Al menos una mayúscula (A-Z)", "Al menos una minúscula (a-z)", "Al menos un número (0-9)", "Al menos un símbolo (!@#$...)"};
+        String[] reqColors = {"#F59E0B", "#3B82F6", "#10B981", "#8B5CF6", "#E63946"};
+        for (int r = 0; r < reqs.length; r++) {
+            HBox reqRow = new HBox(8);
+            reqRow.setAlignment(Pos.CENTER_LEFT);
+            Circle dot = new Circle(3.5);
+            dot.setFill(Color.web(reqColors[r]));
+            Label reqLbl = new Label(reqs[r]);
+            reqLbl.setFont(Font.font("Segoe UI", 11));
+            reqLbl.setTextFill(COLOR_TEXT_MUTED());
+            reqRow.getChildren().addAll(dot, reqLbl);
+            reqBox.getChildren().add(reqRow);
+        }
+
+        // Campos contraseña
+        String fieldStyle =
             "-fx-background-color: " + TemaManager.getSurface() + ";" +
             "-fx-text-fill: " + TemaManager.getText() + ";" +
             "-fx-prompt-text-fill: " + TemaManager.getTextMuted() + ";" +
-            "-fx-background-radius: 10; -fx-border-color: " + TemaManager.getBorder() + "; -fx-border-radius: 10;" +
-            "-fx-font-size: 14px; -fx-padding: 10 16;"
-        );
+            "-fx-background-radius: 10; -fx-border-color: " + TemaManager.getBorder() + ";" +
+            "-fx-border-radius: 10; -fx-font-size: 13px; -fx-padding: 10 16;";
 
-        // Campo confirmar
+        VBox field1Box = new VBox(6);
+        Label lbl1 = new Label("Nueva contraseña");
+        lbl1.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 11));
+        lbl1.setTextFill(COLOR_TEXT_MUTED());
+        PasswordField passNueva = new PasswordField();
+        passNueva.setPromptText("Escribe tu contraseña aquí");
+        passNueva.setPrefHeight(42);
+        passNueva.setMaxWidth(Double.MAX_VALUE);
+        passNueva.setStyle(fieldStyle);
+        field1Box.getChildren().addAll(lbl1, passNueva);
+
+        VBox field2Box = new VBox(6);
+        Label lbl2 = new Label("Confirmar contraseña");
+        lbl2.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 11));
+        lbl2.setTextFill(COLOR_TEXT_MUTED());
         PasswordField passConfirmar = new PasswordField();
-        passConfirmar.setPromptText("Confirmar contrasena");
-        passConfirmar.setMaxWidth(320);
+        passConfirmar.setPromptText("Repite la contraseña");
         passConfirmar.setPrefHeight(42);
-        passConfirmar.setStyle(passNueva.getStyle());
+        passConfirmar.setMaxWidth(Double.MAX_VALUE);
+        passConfirmar.setStyle(fieldStyle);
+        field2Box.getChildren().addAll(lbl2, passConfirmar);
 
         Label errorLabel = new Label();
-        errorLabel.setFont(Font.font("Segoe UI", 12));
+        errorLabel.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 12));
         errorLabel.setTextFill(Color.web("#EF4444"));
-        errorLabel.setVisible(false);
         errorLabel.setWrapText(true);
-        errorLabel.setMaxWidth(320);
+        errorLabel.setPrefWidth(340);
+        errorLabel.setGraphic(IconosSVG.error("#EF4444", 14));
+        errorLabel.setContentDisplay(javafx.scene.control.ContentDisplay.LEFT);
+        errorLabel.setGraphicTextGap(6);
+        errorLabel.setVisible(false);
+        errorLabel.setManaged(false);
 
         HBox botones = new HBox(12);
         botones.setAlignment(Pos.CENTER);
+        botones.setPadding(new Insets(4, 0, 0, 0));
 
         Button btnCancelar = new Button("Cancelar");
-        btnCancelar.setPrefWidth(120);
+        btnCancelar.setPrefWidth(130);
         btnCancelar.setPrefHeight(42);
         btnCancelar.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 13));
         btnCancelar.setStyle(
             "-fx-background-color: " + TemaManager.getSurface() + ";" +
             "-fx-text-fill: " + TemaManager.getText() + ";" +
-            "-fx-background-radius: 10; -fx-cursor: hand;"
+            "-fx-background-radius: 11; -fx-cursor: hand;" +
+            "-fx-border-color: " + TemaManager.getBorder() + ";" +
+            "-fx-border-radius: 11; -fx-border-width: 1;"
         );
         btnCancelar.setOnAction(e -> dialog.close());
 
         Button btnGuardar = new Button("Configurar");
-        btnGuardar.setPrefWidth(120);
+        btnGuardar.setGraphic(IconosSVG.check("#FFFFFF", 14));
+        btnGuardar.setContentDisplay(javafx.scene.control.ContentDisplay.LEFT);
+        btnGuardar.setGraphicTextGap(6);
+        btnGuardar.setPrefWidth(150);
         btnGuardar.setPrefHeight(42);
         btnGuardar.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
+        btnGuardar.setTextFill(Color.WHITE);
         btnGuardar.setStyle(
             "-fx-background-color: #10B981;" +
             "-fx-text-fill: white;" +
-            "-fx-background-radius: 10; -fx-cursor: hand;"
+            "-fx-background-radius: 11; -fx-cursor: hand;"
         );
+        btnGuardar.setOnMouseEntered(ev -> btnGuardar.setStyle("-fx-background-color: #059669; -fx-text-fill: white; -fx-background-radius: 11; -fx-cursor: hand;"));
+        btnGuardar.setOnMouseExited(ev -> btnGuardar.setStyle("-fx-background-color: #10B981; -fx-text-fill: white; -fx-background-radius: 11; -fx-cursor: hand;"));
+
         btnGuardar.setOnAction(e -> {
             String nueva = passNueva.getText();
             String confirmar = passConfirmar.getText();
-            
+            errorLabel.setVisible(false);
+            errorLabel.setManaged(false);
+
             if (nueva.isEmpty() || confirmar.isEmpty()) {
-                errorLabel.setText("Todos los campos son obligatorios");
-                errorLabel.setVisible(true);
+                mostrarErrorSetup(errorLabel, dialog, "Todos los campos son obligatorios");
                 return;
             }
             if (!nueva.equals(confirmar)) {
-                errorLabel.setText("Las contrasenas no coinciden");
-                errorLabel.setVisible(true);
+                mostrarErrorSetup(errorLabel, dialog, "Las contraseñas no coinciden");
                 return;
             }
-            
-            inventario.fx.security.SecurityManager.ResultadoValidacion resultado = 
-                AdminManager.setupInitialPassword(nueva);
-            if (resultado.isValida()) {
-                dialog.close();
-                // Intentar login automático con la contraseña recién configurada
-                AdminManager.LoginResult loginResult = AdminManager.login(nueva);
-                if (loginResult.isExito()) {
-                    mostrarMenu(mainStage);
-                    Platform.runLater(() -> AdminPanelFX.mostrar(mainStage));
+
+            try {
+                inventario.fx.security.SecurityManager.ResultadoValidacion resultado =
+                    AdminManager.setupInitialPassword(nueva);
+                if (resultado.isValida()) {
+                    dialog.close();
+                    AdminManager.LoginResult loginResult = AdminManager.login(nueva);
+                    if (loginResult.isExito()) {
+                        mostrarMenu(mainStage);
+                        Platform.runLater(() -> AdminPanelFX.mostrar(mainStage));
+                    }
+                } else {
+                    mostrarErrorSetup(errorLabel, dialog, resultado.getMensaje());
                 }
-            } else {
-                errorLabel.setText(resultado.getMensaje());
-                errorLabel.setVisible(true);
+            } catch (Exception ex) {
+                mostrarErrorSetup(errorLabel, dialog, "Error inesperado: " + ex.getMessage());
             }
         });
 
         passConfirmar.setOnAction(e -> btnGuardar.fire());
 
         botones.getChildren().addAll(btnCancelar, btnGuardar);
-        container.getChildren().addAll(iconCircle, titulo, subtitulo, passNueva, passConfirmar, errorLabel, botones);
+        body.getChildren().addAll(titulo, chipBox, subtitulo, reqBox, field1Box, field2Box, errorLabel, botones);
+        container.getChildren().addAll(topBand, body);
         root.getChildren().add(container);
 
-        Scene scene = new Scene(root, 440, 480);
+        Scene scene = new Scene(root);
         scene.setFill(Color.TRANSPARENT);
         TemaManager.aplicarTema(scene);
         dialog.setScene(scene);
+        dialog.sizeToScene();
         dialog.centerOnScreen();
 
         container.setOpacity(0);
-        container.setScaleX(0.9);
-        container.setScaleY(0.9);
-        FadeTransition fadeIn = new FadeTransition(Duration.millis(200), container);
+        container.setScaleX(0.92);
+        container.setScaleY(0.92);
+        FadeTransition fadeIn = new FadeTransition(Duration.millis(220), container);
         fadeIn.setToValue(1);
-        ScaleTransition scaleIn = new ScaleTransition(Duration.millis(200), container);
+        ScaleTransition scaleIn = new ScaleTransition(Duration.millis(220), container);
         scaleIn.setToX(1);
         scaleIn.setToY(1);
         new ParallelTransition(fadeIn, scaleIn).play();
 
         dialog.show();
+        dialog.sizeToScene();
+        dialog.centerOnScreen();
         passNueva.requestFocus();
     }
 
@@ -1822,9 +2041,15 @@ public class InventarioFX extends InventarioFXBase {
 
         // Label de error
         Label errorLabel = new Label();
-        errorLabel.setFont(Font.font("Segoe UI", 12));
+        errorLabel.setFont(Font.font("Segoe UI", FontWeight.MEDIUM, 12));
         errorLabel.setTextFill(Color.web("#EF4444"));
+        errorLabel.setWrapText(true);
+        errorLabel.setPrefWidth(280);
         errorLabel.setVisible(false);
+        errorLabel.setManaged(false);
+        errorLabel.setGraphic(IconosSVG.error("#EF4444", 13));
+        errorLabel.setContentDisplay(javafx.scene.control.ContentDisplay.LEFT);
+        errorLabel.setGraphicTextGap(5);
 
         // Botones
         HBox botones = new HBox(12);
@@ -1863,7 +2088,9 @@ public class InventarioFX extends InventarioFXBase {
             } else {
                 errorLabel.setText(result.getMensaje());
                 errorLabel.setVisible(true);
+                errorLabel.setManaged(true);
                 passwordField.clear();
+                Platform.runLater(() -> { dialog.sizeToScene(); dialog.centerOnScreen(); });
                 
                 // Si está bloqueado, deshabilitar botón temporalmente
                 if (result.getSegundosBloqueo() > 0) {
@@ -1877,6 +2104,7 @@ public class InventarioFX extends InventarioFXBase {
                                 btnIngresar.setText("Ingresar");
                                 errorLabel.setText("");
                                 errorLabel.setVisible(false);
+                                errorLabel.setManaged(false);
                             } else {
                                 btnIngresar.setText("Bloqueado (" + restante + "s)");
                             }
@@ -1905,10 +2133,11 @@ public class InventarioFX extends InventarioFXBase {
         container.getChildren().addAll(iconCircle, titulo, subtitulo, passwordContainer, errorLabel, botones);
         root.getChildren().add(container);
 
-        Scene scene = new Scene(root, 400, 380);
+        Scene scene = new Scene(root);
         scene.setFill(Color.TRANSPARENT);
         TemaManager.aplicarTema(scene);
         dialog.setScene(scene);
+        dialog.sizeToScene();
         dialog.centerOnScreen();
 
         // Animación de entrada
@@ -2130,7 +2359,9 @@ public class InventarioFX extends InventarioFXBase {
             if (e.getTarget() == root) dialog.close();
         });
 
-        Scene scene = new Scene(root, 1050, 880);
+        Scene scene = new Scene(root,
+                ScreenUtils.w(1050, 900),
+                ScreenUtils.h(880, 700));
         scene.setFill(Color.TRANSPARENT);
         TemaManager.aplicarTema(scene);
         dialog.setScene(scene);
@@ -3072,7 +3303,9 @@ public class InventarioFX extends InventarioFXBase {
             if (e.getTarget() == root) dialog.close();
         });
 
-        Scene scene = new Scene(root, 680, 750);
+        Scene scene = new Scene(root,
+                ScreenUtils.w(680, 500),
+                ScreenUtils.h(750, 600));
         scene.setFill(Color.TRANSPARENT);
         TemaManager.aplicarTema(scene);
         dialog.setScene(scene);
@@ -3558,6 +3791,8 @@ public class InventarioFX extends InventarioFXBase {
 
     public static void mostrarPantallaCarga(String mensaje, Runnable alCompletar) {
         loadingStage = new Stage(StageStyle.TRANSPARENT);
+        loadingStage.initOwner(mainStage);   // agrupar con la ventana principal en taskbar
+        aplicarIconoApp(loadingStage);       // ícono SELCOMP en lugar de Java
         loadingStage.setWidth(400);
         loadingStage.setHeight(240);
 
@@ -4201,7 +4436,9 @@ public class InventarioFX extends InventarioFXBase {
         container.getChildren().addAll(header, infoBox, nombreBox, descBox, lblAviso, botones);
         root.getChildren().add(container);
 
-        Scene scene = new Scene(root, 490, 480);
+        Scene scene = new Scene(root,
+                ScreenUtils.w(490, 400),
+                ScreenUtils.h(480, 380));
         scene.setFill(Color.TRANSPARENT);
         TemaManager.aplicarTema(scene);
         dialog.setScene(scene);
@@ -5175,7 +5412,9 @@ public class InventarioFX extends InventarioFXBase {
         container.getChildren().addAll(header, scrollPreview, botones);
         root.getChildren().add(container);
 
-        Scene scene = new Scene(root, 560, 590);
+        Scene scene = new Scene(root,
+                ScreenUtils.w(560, 460),
+                ScreenUtils.h(590, 480));
         scene.setFill(Color.TRANSPARENT);
         TemaManager.aplicarTema(scene);
         dialog.setScene(scene);

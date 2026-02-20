@@ -7,6 +7,7 @@ import inventario.fx.ui.firma.FirmaDigitalCanvas;
 import inventario.fx.excel.GeneratedTemplate;
 import inventario.fx.excel.ExcelToPdfConverter;
 import inventario.fx.util.AppLogger;
+import inventario.fx.util.ScreenUtils;
 
 import inventario.fx.util.SVGUtil;
 import javafx.animation.*;
@@ -302,10 +303,10 @@ public class ReporteFormularioFX {
         formStage.initModality(Modality.NONE); // Ventana completamente independiente
         // Sin initOwner — aparece como ventana separada en la barra de tareas
         formStage.setTitle("SELCOMP — Reporte de Mantenimiento");
-        formStage.setWidth(1100);
-        formStage.setHeight(1000);
+        formStage.setWidth(ScreenUtils.w(1100, 900));
+        formStage.setHeight(ScreenUtils.h(1000, 750));
         formStage.setMinWidth(900);
-        formStage.setMinHeight(850);
+        formStage.setMinHeight(750);
 
         // Icono Selcomp
         try {
